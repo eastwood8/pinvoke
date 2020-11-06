@@ -58,7 +58,7 @@ namespace Win32MetaGeneration
 
         public TypeSyntax GetTypeFromSerializedName(string name) => ParseName(name.Substring(0, name.IndexOf(',')));
 
-        public PrimitiveTypeCode GetUnderlyingEnumType(TypeSyntax type) => throw new NotImplementedException();
+        public PrimitiveTypeCode GetUnderlyingEnumType(TypeSyntax type) => PrimitiveTypeCode.Int32; // an assumption that works for now.
 
         public bool IsSystemType(TypeSyntax type) => type is QualifiedNameSyntax { Left: IdentifierNameSyntax { Identifier: { ValueText: "System" } }, Right: { Identifier: { ValueText: "Type" } } };
     }

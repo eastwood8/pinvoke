@@ -60,6 +60,7 @@ namespace Win32MetaGeneration
             string name = reader.GetString(td.Name);
 
             // Take this opportunity to ensure the type exists too.
+            // TODO: reuse types where they exist in .NET Framework (e.g. FILETIME)
             this.owner.GenerateInteropType(handle);
 
             return IdentifierName(name);

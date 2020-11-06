@@ -29,24 +29,54 @@ namespace Win32MetaGeneration
         private static readonly HashSet<string> CanonicalCapitalizations = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "AdvApi32",
-            "Crypt32",
-            "Gdi32",
-            "NCrypt",
-            "ComCtl32",
-            "CryptNet",
-            "DnsApi",
             "BCrypt",
+            "Cabinet",
+            "CfgMgr32",
+            "CodeGeneration",
+            "CodeGeneration.Debugging",
+            "CodeGenerationAttributes",
+            "Crypt32",
+            "DbgHelp",
+            "DwmApi",
+            "Fusion",
+            "Gdi32",
+            "Hid",
+            "ImageHlp",
+            "IPHlpApi",
+            "Kernel32",
+            "Magnification",
+            "MSCorEE",
+            "Msi",
+            "NCrypt",
+            "NetApi32",
+            "NewDev",
             "NTDll",
             "Ole32",
-            "WinHttp",
-            "Kernel32",
-            "WebSocket",
+            "Psapi",
+            "SetupApi",
+            "SHCore",
+            "Shell32",
             "User32",
+            "Userenv",
+            "UxTheme",
+            "Win32",
+            "Win32MetaGeneration",
+            "Windows.Core",
+            "Windows.ShellScalingApi",
+            "WinUsb",
+            "WtsApi32",
+        };
+
+        private static readonly HashSet<string> CSharpKeywords = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "event",
         };
 
         private static readonly AttributeSyntax InAttributeSyntax = Attribute(IdentifierName("In"));
         private static readonly AttributeSyntax OutAttributeSyntax = Attribute(IdentifierName("Out"));
+        private static readonly AttributeSyntax OptionalAttributeSyntax = Attribute(IdentifierName("Optional"));
         private static readonly AttributeSyntax FlagsAttributeSyntax = Attribute(IdentifierName("Flags"));
+        private static readonly AttributeSyntax FieldOffsetAttributeSyntax = Attribute(IdentifierName("FieldOffset"));
 
         private static readonly SyntaxTokenList PublicModifiers = TokenList(Token(SyntaxKind.PublicKeyword));
 
@@ -68,6 +98,8 @@ namespace Win32MetaGeneration
         /// </summary>
         private readonly HashSet<TypeDefinitionHandle> typesGenerating = new HashSet<TypeDefinitionHandle>();
 
+        private readonly Dictionary<TypeDefinitionHandle, TypeDefinitionHandle> nestedToDeclaringLookup = new Dictionary<TypeDefinitionHandle, TypeDefinitionHandle>();
+
         internal Generator(string pathToMetaLibrary, string languageName)
         {
             var project = CSharpCompilation.Create("PInvoke")
@@ -83,6 +115,8 @@ namespace Win32MetaGeneration
             this.generator = SyntaxGenerator.GetGenerator(workspace, languageName);
             this.signatureTypeProvider = new SignatureTypeProvider(project, this.generator, this);
             this.customAttributeTypeProvider = new CustomAttributeTypeProvider();
+
+            this.InitializeNestedToDeclaringLookupDictionary();
         }
 
         internal CompilationUnitSyntax CompilationUnit
@@ -90,7 +124,7 @@ namespace Win32MetaGeneration
             get => CompilationUnit()
                 .AddMembers(this.modulesAndMembers.Select(kv =>
                     ClassDeclaration(Identifier(kv.Key))
-                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword))
+                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
                         .AddMembers(kv.Value.ToArray())).ToArray())
                         .AddMembers(this.types.Values.ToArray())
                 .AddUsings(
@@ -105,6 +139,15 @@ namespace Win32MetaGeneration
             this.metadataStream.Dispose();
         }
 
+        internal void GenerateAll(CancellationToken cancellationToken)
+        {
+            this.GenerateAllExternMethods(cancellationToken);
+
+            // Also generate all structs/enum types too, even if not referenced by a method,
+            // since some methods use `void*` types and require structs at runtime.
+            this.GenerateAllInteropTypes(cancellationToken);
+        }
+
         /// <summary>
         /// Generates a projection of Win32 APIs.
         /// </summary>
@@ -116,12 +159,37 @@ namespace Win32MetaGeneration
                 cancellationToken.ThrowIfCancellationRequested();
 
                 var methodDefinition = this.mr.GetMethodDefinition(methodHandle);
-                ////if (!this.mr.StringComparer.Equals(methodDefinition.Name, "GetCurrentDirectoryW"))
-                ////{
-                ////    continue;
-                ////}
-
                 this.GenerateExternMethod(methodDefinition);
+            }
+        }
+
+        internal void GenerateAllInteropTypes(CancellationToken cancellationToken)
+        {
+            foreach (TypeDefinitionHandle typeDefinitionHandle in this.mr.TypeDefinitions)
+            {
+                TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefinitionHandle);
+                if (typeDef.BaseType.IsNil)
+                {
+                    continue;
+                }
+
+                bool isCompilerGenerated = false;
+                foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
+                {
+                    var att = this.mr.GetCustomAttribute(attHandle);
+                    if (this.IsAttribute(att, "System.Runtime.CompilerServices", nameof(CompilerGeneratedAttribute)))
+                    {
+                        isCompilerGenerated = true;
+                        break;
+                    }
+                }
+
+                if (isCompilerGenerated)
+                {
+                    continue;
+                }
+
+                this.GenerateInteropType(typeDefinitionHandle);
             }
         }
 
@@ -137,19 +205,30 @@ namespace Win32MetaGeneration
             MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null!);
 
             var methodName = this.mr.GetString(methodDefinition.Name);
+
             var moduleName = this.GetNormalizedModuleName(import);
 
+            if (false && !CanonicalCapitalizations.Contains(moduleName))
+            {
+                // Skip methods for modules we are not prepared to export.
+                return;
+            }
+
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
-                List<AttributeListSyntax>().Add(AttributeList().AddAttributes(this.CreateDllImportAttribute(methodDefinition, import, moduleName))),
-                modifiers: TokenList(Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.UnsafeKeyword)),
+                List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName))),
+                modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword)),
                 signature.ReturnType,
                 explicitInterfaceSpecifier: null!,
-                Identifier(methodName),
-                TypeParameterList(),
+                SafeIdentifier(methodName),
+                null!,
                 this.CreateParameterList(methodDefinition, signature),
                 List<TypeParameterConstraintClauseSyntax>(),
                 body: null!,
                 Token(SyntaxKind.SemicolonToken));
+            if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
+            {
+                methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
+            }
 
             List<MemberDeclarationSyntax> methodsList = this.GetModuleMemberList(moduleName);
             methodsList.Add(methodDeclaration);
@@ -157,18 +236,98 @@ namespace Win32MetaGeneration
 
         internal void GenerateInteropType(TypeDefinitionHandle typeDefHandle)
         {
+            if (this.mr.StringComparer.Equals(this.mr.GetTypeDefinition(typeDefHandle).Name, "FILE_REGION_OUTPUT"))
+            {
+                Debugger.Break();
+            }
+
+            if (this.nestedToDeclaringLookup.TryGetValue(typeDefHandle, out TypeDefinitionHandle nestingParentHandle))
+            {
+                // We should only generate this type into its parent type.
+                this.GenerateInteropType(nestingParentHandle);
+                return;
+            }
+
             if (!this.typesGenerating.Add(typeDefHandle))
             {
                 return;
             }
 
+            MemberDeclarationSyntax? typeDeclaration = this.CreateInteropType(typeDefHandle);
+
+            if (typeDeclaration is object)
+            {
+                this.types.Add(typeDefHandle, typeDeclaration);
+            }
+        }
+
+        private static AttributeSyntax FieldOffset(int offset) => FieldOffsetAttributeSyntax.AddArgumentListArguments(AttributeArgument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(offset))));
+
+        private static AttributeSyntax StructLayout(TypeDefinition typeDef, TypeLayout layout)
+        {
+            LayoutKind layoutKind = (typeDef.Attributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout ? LayoutKind.Explicit : LayoutKind.Sequential;
+            var structLayoutAttribute = Attribute(IdentifierName(nameof(StructLayoutAttribute))).AddArgumentListArguments(
+                AttributeArgument(MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    IdentifierName(nameof(LayoutKind)),
+                    IdentifierName(Enum.GetName(typeof(LayoutKind), layoutKind)!))));
+
+            if (layout.PackingSize > 0)
+            {
+                structLayoutAttribute = structLayoutAttribute.AddArgumentListArguments(
+                    AttributeArgument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(layout.PackingSize)))
+                        .WithNameEquals(NameEquals(nameof(StructLayoutAttribute.Pack))));
+            }
+
+            if (layout.Size > 0)
+            {
+                structLayoutAttribute = structLayoutAttribute.AddArgumentListArguments(
+                    AttributeArgument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(layout.Size)))
+                        .WithNameEquals(NameEquals(nameof(StructLayoutAttribute.Size))));
+            }
+
+            return structLayoutAttribute;
+        }
+
+        private static AttributeSyntax DllImport(MethodDefinition methodDefinition, MethodImport import, string moduleName)
+        {
+            var dllImportAttribute = Attribute(IdentifierName("DllImport")).AddArgumentListArguments(
+                AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(moduleName))),
+                AttributeArgument(LiteralExpression(SyntaxKind.TrueLiteralExpression)).WithNameEquals(NameEquals(nameof(DllImportAttribute.ExactSpelling))));
+            return dllImportAttribute;
+        }
+
+        private static AttributeSyntax UnmanagedFunctionPointer(CallingConvention callingConvention)
+        {
+            return Attribute(IdentifierName(nameof(UnmanagedFunctionPointerAttribute)))
+                .AddArgumentListArguments(AttributeArgument(MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    IdentifierName(nameof(CallingConvention)),
+                    IdentifierName(Enum.GetName(typeof(CallingConvention), callingConvention)!))));
+        }
+
+        private static SyntaxToken SafeIdentifier(string name) => Identifier(CSharpKeywords.Contains(name) ? "@" + name : name);
+
+        private MemberDeclarationSyntax? CreateInteropType(TypeDefinitionHandle typeDefHandle)
+        {
             TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefHandle);
             var baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
             MemberDeclarationSyntax typeDeclaration;
 
             if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(ValueType)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))
             {
-                typeDeclaration = this.CreateInteropStruct(typeDef);
+                StructDeclarationSyntax structDeclaration = this.CreateInteropStruct(typeDef);
+
+                // Proactively generate all nested types as well.
+                foreach (TypeDefinitionHandle nestedHandle in typeDef.GetNestedTypes())
+                {
+                    if (this.CreateInteropType(nestedHandle) is { } nestedType)
+                    {
+                        structDeclaration = structDeclaration.AddMembers(nestedType);
+                    }
+                }
+
+                typeDeclaration = structDeclaration;
             }
             else if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))
             {
@@ -180,33 +339,75 @@ namespace Win32MetaGeneration
             }
             else
             {
-                return; // not yet supported.
+                // not yet supported.
+                return null;
             }
 
-            this.types.Add(typeDefHandle, typeDeclaration);
+            return typeDeclaration;
+        }
+
+        private void InitializeNestedToDeclaringLookupDictionary()
+        {
+            foreach (TypeDefinitionHandle typeDefHandle in this.mr.TypeDefinitions)
+            {
+                TypeDefinition typeDefinition = this.mr.GetTypeDefinition(typeDefHandle);
+                if (!typeDefinition.IsNested)
+                {
+                    AddNestedTypesOf(typeDefHandle);
+                }
+            }
+
+            void AddNestedTypesOf(TypeDefinitionHandle parentHandle)
+            {
+                TypeDefinition typeDefinition = this.mr.GetTypeDefinition(parentHandle);
+                foreach (TypeDefinitionHandle nestedHandle in typeDefinition.GetNestedTypes())
+                {
+                    this.nestedToDeclaringLookup.Add(nestedHandle, parentHandle);
+                    AddNestedTypesOf(nestedHandle);
+                }
+            }
         }
 
         private DelegateDeclarationSyntax CreateInteropDelegate(TypeDefinition typeDef)
         {
-            // TODO: UnmanagedFunctionPointerAttribute
             string name = this.mr.GetString(typeDef.Name);
+
+            CallingConvention? callingConvention = null;
+            foreach (CustomAttributeHandle handle in typeDef.GetCustomAttributes())
+            {
+                var att = this.mr.GetCustomAttribute(handle);
+                if (this.IsAttribute(att, "System.Runtime.InteropServices", nameof(UnmanagedFunctionPointerAttribute)))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    callingConvention = (CallingConvention)(int)args.FixedArguments[0].Value!;
+                }
+            }
 
             MethodDefinition invokeMethodDef = typeDef.GetMethods().Select(this.mr.GetMethodDefinition).Single(def => this.mr.StringComparer.Equals(def.Name, "Invoke"));
             MethodSignature<TypeSyntax> signature = invokeMethodDef.DecodeSignature(this.signatureTypeProvider, null!);
 
-            return DelegateDeclaration(signature.ReturnType, name)
+            DelegateDeclarationSyntax result = DelegateDeclaration(signature.ReturnType, name)
                 .WithParameterList(this.CreateParameterList(invokeMethodDef, signature))
                 .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword));
+
+            if (callingConvention.HasValue)
+            {
+                result = result.AddAttributeLists(AttributeList().AddAttributes(UnmanagedFunctionPointer(callingConvention.Value)));
+            }
+
+            return result;
         }
 
         private StructDeclarationSyntax CreateInteropStruct(TypeDefinition typeDef)
         {
+            // TODO: Add handling for
+            // * property indexers (e.g. FILE_REGION_OUTPUT._Region_e__FixedBuffer.this[int]
+            // * record GuidAttribute
             string name = this.mr.GetString(typeDef.Name);
 
             var members = new List<MemberDeclarationSyntax>();
             foreach (FieldDefinitionHandle fieldDefHandle in typeDef.GetFields())
             {
-                // TODO: fix handling of fixed size buffers (e.g. WIN32_FIND_DATAA)
                 FieldDefinition fieldDef = this.mr.GetFieldDefinition(fieldDefHandle);
                 string fieldName = this.mr.GetString(fieldDef.Name);
 
@@ -222,6 +423,7 @@ namespace Win32MetaGeneration
                 }
 
                 FieldDeclarationSyntax field;
+                VariableDeclaratorSyntax fieldDeclarator = VariableDeclarator(SafeIdentifier(fieldName));
                 if (fixedBufferAttribute.HasValue)
                 {
                     CustomAttributeValue<TypeSyntax> attributeArgs = fixedBufferAttribute.Value.DecodeValue(this.customAttributeTypeProvider);
@@ -230,14 +432,15 @@ namespace Win32MetaGeneration
                     field = FieldDeclaration(
                         VariableDeclaration(fieldType))
                         .AddDeclarationVariables(
-                            VariableDeclarator(fieldName)
+                            fieldDeclarator
                                 .WithArgumentList(BracketedArgumentList(SingletonSeparatedList(Argument(size)))))
                         .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword), Token(SyntaxKind.FixedKeyword));
                 }
                 else
                 {
                     TypeSyntax fieldType = fieldDef.DecodeSignature(this.signatureTypeProvider, null!);
-                    field = FieldDeclaration(VariableDeclaration(fieldType).AddVariables(VariableDeclarator(fieldName)))
+                    fieldType = this.ReinterpretType(fieldType, fieldDef.GetMarshallingDescriptor());
+                    field = FieldDeclaration(VariableDeclaration(fieldType).AddVariables(fieldDeclarator))
                         .AddModifiers(Token(SyntaxKind.PublicKeyword));
                     if (fieldType is PointerTypeSyntax)
                     {
@@ -245,12 +448,26 @@ namespace Win32MetaGeneration
                     }
                 }
 
+                int offset = fieldDef.GetOffset();
+                if (offset >= 0)
+                {
+                    field = field.AddAttributeLists(AttributeList().AddAttributes(FieldOffset(offset)));
+                }
+
                 members.Add(field);
             }
 
-            // TODO: specify Pack size where necessary
-            return StructDeclaration(name)
-                .AddMembers(members.ToArray());
+            StructDeclarationSyntax result = StructDeclaration(name)
+                .AddMembers(members.ToArray())
+                .WithModifiers(PublicModifiers);
+
+            TypeLayout layout = typeDef.GetLayout();
+            if (!layout.IsDefault)
+            {
+                result = result.AddAttributeLists(AttributeList().AddAttributes(StructLayout(typeDef, layout)));
+            }
+
+            return result;
         }
 
         private EnumDeclarationSyntax CreateInteropEnum(TypeDefinition typeDef)
@@ -269,7 +486,7 @@ namespace Win32MetaGeneration
                 }
 
                 Constant value = this.mr.GetConstant(valueHandle);
-                enumValues.Add(EnumMemberDeclaration(Identifier(enumValueName)).WithEqualsValue(EqualsValueClause(this.ToExpressionSyntax(value))));
+                enumValues.Add(EnumMemberDeclaration(SafeIdentifier(enumValueName)).WithEqualsValue(EqualsValueClause(this.ToExpressionSyntax(value))));
             }
 
             if (enumBaseType is null)
@@ -332,14 +549,6 @@ namespace Win32MetaGeneration
             return moduleName;
         }
 
-        private AttributeSyntax CreateDllImportAttribute(MethodDefinition methodDefinition, MethodImport import, string moduleName)
-        {
-            var dllImportAttribute = Attribute(IdentifierName("DllImport")).AddArgumentListArguments(
-                AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(moduleName))),
-                AttributeArgument(LiteralExpression(SyntaxKind.TrueLiteralExpression)).WithNameEquals(NameEquals(nameof(DllImportAttribute.ExactSpelling))));
-            return dllImportAttribute;
-        }
-
         private TypeDefinition GetApisClass() => this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, "Microsoft.Windows.Sdk"));
 
         private ParameterListSyntax CreateParameterList(MethodDefinition methodDefinition, MethodSignature<TypeSyntax> signature)
@@ -348,7 +557,13 @@ namespace Win32MetaGeneration
         private ParameterSyntax CreateParameter(MethodSignature<TypeSyntax> methodSignature, Parameter parameter)
         {
             string name = this.mr.GetString(parameter.Name);
-            TypeSyntax type = this.ReinterpretParameterType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter);
+
+            // TODO:
+            // * change double-pointers to `out` modifiers on single-pointers.
+            //   * Consider CredEnumerateA, which is a "pointer to an array of pointers" (3-asterisks!). How does FriendlyAttribute improve this, if at all? The memory must be freed through another p/invoke.
+            // * Add [Friendly] attributes
+            // * Notice [Out][RIAAFree] handle producing parameters. Can we make these provide SafeHandle's?
+            TypeSyntax type = this.ReinterpretType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetMarshallingDescriptor());
 
             // Determine the custom attributes to apply.
             var attributes = AttributeList();
@@ -363,6 +578,11 @@ namespace Win32MetaGeneration
                 {
                     attributes = attributes.AddAttributes(OutAttributeSyntax);
                 }
+
+                if ((parameter.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional)
+                {
+                    attributes = attributes.AddAttributes(OptionalAttributeSyntax);
+                }
             }
 
             var modifiers = TokenList();
@@ -371,31 +591,30 @@ namespace Win32MetaGeneration
                 attributes.Attributes.Count > 0 ? List<AttributeListSyntax>().Add(attributes) : List<AttributeListSyntax>(),
                 modifiers,
                 type,
-                Identifier(name),
+                SafeIdentifier(name),
                 @default: null);
 
             return parameterSyntax;
         }
 
-        private TypeSyntax ReinterpretParameterType(TypeSyntax originalParameterType, Parameter parameter)
+        private TypeSyntax ReinterpretType(TypeSyntax originalType, BlobHandle marshallingDescriptor)
         {
-            bool inAttribute = (parameter.Attributes & ParameterAttributes.In) == ParameterAttributes.In;
-            UnmanagedType? unmanagedType = this.GetUnmanagedType(parameter.GetMarshallingDescriptor());
-            if (unmanagedType == UnmanagedType.LPWStr && originalParameterType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: SyntaxToken token } } && "ushort".Equals(token.Value))
+            UnmanagedType? unmanagedType = this.GetUnmanagedType(marshallingDescriptor);
+            if (unmanagedType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: SyntaxToken token } } && "ushort".Equals(token.Value))
             {
                 return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
             }
 
             if (unmanagedType == UnmanagedType.LPArray)
             {
-                MarshalAsAttribute marshalAs = this.ToMarshalAsAttribute(parameter.GetMarshallingDescriptor());
-                if (marshalAs.ArraySubType == UnmanagedType.LPWStr && originalParameterType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: SyntaxToken token2 } } && "ushort".Equals(token2.Value))
+                MarshalAsAttribute marshalAs = this.ToMarshalAsAttribute(marshallingDescriptor);
+                if (marshalAs.ArraySubType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: SyntaxToken token2 } } && "ushort".Equals(token2.Value))
                 {
                     return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
                 }
             }
 
-            return originalParameterType;
+            return originalType;
         }
 
         private UnmanagedType? GetUnmanagedType(BlobHandle blobHandle)

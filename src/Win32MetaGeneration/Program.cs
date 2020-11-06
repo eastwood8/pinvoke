@@ -34,7 +34,7 @@ namespace Win32MetaGeneration
                 var sw = Stopwatch.StartNew();
 
                 var generator = new Generator(pathToMetaLibrary, LanguageNames.CSharp);
-                generator.GenerateAllExternMethods(cts.Token);
+                generator.GenerateAll(cts.Token);
 
                 using var generatedSourceStream = new FileStream(Path.Combine(outputDirectory, "NativeMethods.cs"), FileMode.Create, FileAccess.Write, FileShare.Read);
                 using var generatedSourceWriter = new StreamWriter(generatedSourceStream, Encoding.UTF8);
