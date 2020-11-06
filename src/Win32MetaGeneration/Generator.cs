@@ -208,6 +208,11 @@ namespace Win32MetaGeneration
             MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null!);
 
             var methodName = this.mr.GetString(methodDefinition.Name);
+            if (this.IsAnsiFunction(methodDefinition, methodName))
+            {
+                // Skip Ansi functions.
+                return;
+            }
 
             var moduleName = this.GetNormalizedModuleName(import);
 
@@ -217,8 +222,15 @@ namespace Win32MetaGeneration
                 return;
             }
 
+            string? entrypoint = null;
+            if (this.IsWideFunction(methodDefinition, methodName))
+            {
+                entrypoint = methodName;
+                methodName = methodName.Substring(0, methodName.Length - 1);
+            }
+
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
-                List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName))),
+                List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName, entrypoint))),
                 modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword)),
                 signature.ReturnType,
                 explicitInterfaceSpecifier: null!,
@@ -298,11 +310,19 @@ namespace Win32MetaGeneration
                 AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(guid.ToString().ToUpperInvariant()))));
         }
 
-        private static AttributeSyntax DllImport(MethodDefinition methodDefinition, MethodImport import, string moduleName)
+        private static AttributeSyntax DllImport(MethodDefinition methodDefinition, MethodImport import, string moduleName, string? entrypoint)
         {
             var dllImportAttribute = Attribute(IdentifierName("DllImport")).AddArgumentListArguments(
                 AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(moduleName))),
                 AttributeArgument(LiteralExpression(SyntaxKind.TrueLiteralExpression)).WithNameEquals(NameEquals(nameof(DllImportAttribute.ExactSpelling))));
+
+            if (entrypoint is object)
+            {
+                dllImportAttribute = dllImportAttribute.AddArgumentListArguments(
+                    AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(entrypoint)))
+                        .WithNameEquals(NameEquals(nameof(DllImportAttribute.EntryPoint))));
+            }
+
             return dllImportAttribute;
         }
 
@@ -316,6 +336,32 @@ namespace Win32MetaGeneration
         }
 
         private static SyntaxToken SafeIdentifier(string name) => Identifier(CSharpKeywords.Contains(name) ? "@" + name : name);
+
+        private bool IsWideFunction(MethodDefinition method, string methodName)
+        {
+            if (methodName.Length > 1 && methodName.EndsWith('W') && char.IsLower(methodName[methodName.Length - 2]))
+            {
+                // The name looks very much like an Wide-char method.
+                // If further confidence is ever needed, we could look at the parameter and return types
+                // to see if they have charset-related metadata in their marshaling metadata.
+                return true;
+            }
+
+            return false;
+        }
+
+        private bool IsAnsiFunction(MethodDefinition method, string methodName)
+        {
+            if (methodName.Length > 1 && methodName.EndsWith('A') && char.IsLower(methodName[methodName.Length - 2]))
+            {
+                // The name looks very much like an Ansi method.
+                // If further confidence is ever needed, we could look at the parameter and return types
+                // to see if they have charset-related metadata in their marshaling metadata.
+                return true;
+            }
+
+            return false;
+        }
 
         private MemberDeclarationSyntax? CreateInteropType(TypeDefinitionHandle typeDefHandle)
         {
