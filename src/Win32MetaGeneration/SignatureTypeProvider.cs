@@ -17,13 +17,11 @@ namespace Win32MetaGeneration
         private static readonly TypeSyntax IntPtrTypeSyntax = IdentifierName(nameof(IntPtr));
         private static readonly TypeSyntax UIntPtrTypeSyntax = IdentifierName(nameof(UIntPtr));
         private readonly CSharpCompilation compilation;
-        private readonly SyntaxGenerator syntaxGenerator;
         private readonly Generator owner;
 
-        internal SignatureTypeProvider(CSharpCompilation compilation, SyntaxGenerator syntaxGenerator, Generator owner)
+        internal SignatureTypeProvider(CSharpCompilation compilation, Generator owner)
         {
             this.compilation = compilation;
-            this.syntaxGenerator = syntaxGenerator;
             this.owner = owner;
         }
 

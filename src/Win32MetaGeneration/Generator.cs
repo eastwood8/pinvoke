@@ -83,7 +83,6 @@ namespace Win32MetaGeneration
         private readonly FileStream metadataStream;
         private readonly PEReader peReader;
         private readonly MetadataReader mr;
-        private readonly SyntaxGenerator generator;
         private readonly SignatureTypeProvider signatureTypeProvider;
         private readonly CustomAttributeTypeProvider customAttributeTypeProvider;
         private readonly Dictionary<string, List<MemberDeclarationSyntax>> modulesAndMembers = new Dictionary<string, List<MemberDeclarationSyntax>>(StringComparer.OrdinalIgnoreCase);
@@ -112,10 +111,10 @@ namespace Win32MetaGeneration
             this.mr = this.peReader.GetMetadataReader();
 
             var workspace = new AdhocWorkspace();
-            this.generator = SyntaxGenerator.GetGenerator(workspace, languageName);
-            this.signatureTypeProvider = new SignatureTypeProvider(project, this.generator, this);
+            this.signatureTypeProvider = new SignatureTypeProvider(project, this);
             this.customAttributeTypeProvider = new CustomAttributeTypeProvider();
 
+            this.Apis = this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, "Microsoft.Windows.Sdk"));
             this.InitializeNestedToDeclaringLookupDictionary();
         }
 
@@ -132,6 +131,10 @@ namespace Win32MetaGeneration
                     UsingDirective(ParseName("System.Runtime.InteropServices")))
                 .NormalizeWhitespace();
         }
+
+        internal TypeDefinition Apis { get; }
+
+        internal MetadataReader Reader => this.mr;
 
         public void Dispose()
         {
@@ -154,7 +157,7 @@ namespace Win32MetaGeneration
         /// <param name="cancellationToken">A cancellation token.</param>
         internal void GenerateAllExternMethods(CancellationToken cancellationToken)
         {
-            foreach (MethodDefinitionHandle methodHandle in this.GetApisClass().GetMethods())
+            foreach (MethodDefinitionHandle methodHandle in this.Apis.GetMethods())
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -287,6 +290,12 @@ namespace Win32MetaGeneration
             }
 
             return structLayoutAttribute;
+        }
+
+        private static AttributeSyntax GUID(Guid guid)
+        {
+            return Attribute(IdentifierName("Guid")).AddArgumentListArguments(
+                AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(guid.ToString().ToUpperInvariant()))));
         }
 
         private static AttributeSyntax DllImport(MethodDefinition methodDefinition, MethodImport import, string moduleName)
@@ -467,6 +476,22 @@ namespace Win32MetaGeneration
                 result = result.AddAttributeLists(AttributeList().AddAttributes(StructLayout(typeDef, layout)));
             }
 
+            Guid guid = Guid.Empty;
+            foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
+            {
+                CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                if (this.IsAttribute(att, "System.Runtime.InteropServices", nameof(GuidAttribute)))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    guid = Guid.Parse((string)args.FixedArguments[0].Value!);
+                }
+            }
+
+            if (guid != Guid.Empty)
+            {
+                result = result.AddAttributeLists(AttributeList().AddAttributes(GUID(guid)));
+            }
+
             return result;
         }
 
@@ -507,9 +532,13 @@ namespace Win32MetaGeneration
 
             var name = this.mr.GetString(typeDef.Name);
             EnumDeclarationSyntax result = EnumDeclaration(name)
-                .AddBaseListTypes(SimpleBaseType(enumBaseType))
                 .AddMembers(enumValues.ToArray())
                 .WithModifiers(PublicModifiers);
+
+            if (!(enumBaseType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.IntKeyword } }))
+            {
+                result = result.AddBaseListTypes(SimpleBaseType(enumBaseType));
+            }
 
             if (flagsEnum)
             {
@@ -548,8 +577,6 @@ namespace Win32MetaGeneration
 
             return moduleName;
         }
-
-        private TypeDefinition GetApisClass() => this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, "Microsoft.Windows.Sdk"));
 
         private ParameterListSyntax CreateParameterList(MethodDefinition methodDefinition, MethodSignature<TypeSyntax> signature)
             => ParameterList().AddParameters(methodDefinition.GetParameters().Select(this.mr.GetParameter).Where(p => !p.Name.IsNil).Select(p => this.CreateParameter(signature, p)).ToArray());
@@ -600,7 +627,7 @@ namespace Win32MetaGeneration
         private TypeSyntax ReinterpretType(TypeSyntax originalType, BlobHandle marshallingDescriptor)
         {
             UnmanagedType? unmanagedType = this.GetUnmanagedType(marshallingDescriptor);
-            if (unmanagedType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: SyntaxToken token } } && "ushort".Equals(token.Value))
+            if (unmanagedType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
             {
                 return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
             }
@@ -608,7 +635,7 @@ namespace Win32MetaGeneration
             if (unmanagedType == UnmanagedType.LPArray)
             {
                 MarshalAsAttribute marshalAs = this.ToMarshalAsAttribute(marshallingDescriptor);
-                if (marshalAs.ArraySubType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: SyntaxToken token2 } } && "ushort".Equals(token2.Value))
+                if (marshalAs.ArraySubType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
                 {
                     return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
                 }
