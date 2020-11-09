@@ -12,7 +12,7 @@ namespace Win32MetaGeneration
     using Microsoft.CodeAnalysis.Editing;
     using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
-    internal class SignatureTypeProvider : ISignatureTypeProvider<TypeSyntax, IGenericContext>
+    internal class SignatureTypeProvider : ISignatureTypeProvider<TypeSyntax, IGenericContext?>
     {
         private static readonly TypeSyntax IntPtrTypeSyntax = IdentifierName(nameof(IntPtr));
         private static readonly TypeSyntax UIntPtrTypeSyntax = IdentifierName(nameof(UIntPtr));
@@ -79,9 +79,9 @@ namespace Win32MetaGeneration
 
         public TypeSyntax GetGenericInstantiation(TypeSyntax genericType, ImmutableArray<TypeSyntax> typeArguments) => throw new NotImplementedException();
 
-        public TypeSyntax GetGenericMethodParameter(IGenericContext genericContext, int index) => throw new NotImplementedException();
+        public TypeSyntax GetGenericMethodParameter(IGenericContext? genericContext, int index) => throw new NotImplementedException();
 
-        public TypeSyntax GetGenericTypeParameter(IGenericContext genericContext, int index) => throw new NotImplementedException();
+        public TypeSyntax GetGenericTypeParameter(IGenericContext? genericContext, int index) => throw new NotImplementedException();
 
         public TypeSyntax GetModifiedType(TypeSyntax modifier, TypeSyntax unmodifiedType, bool isRequired) => throw new NotImplementedException();
 
@@ -89,7 +89,7 @@ namespace Win32MetaGeneration
 
         public TypeSyntax GetSZArrayType(TypeSyntax elementType) => throw new NotImplementedException();
 
-        public TypeSyntax GetTypeFromSpecification(MetadataReader reader, IGenericContext genericContext, TypeSpecificationHandle handle, byte rawTypeKind) => throw new NotImplementedException();
+        public TypeSyntax GetTypeFromSpecification(MetadataReader reader, IGenericContext? genericContext, TypeSpecificationHandle handle, byte rawTypeKind) => throw new NotImplementedException();
     }
 
 #pragma warning disable SA1201 // Elements should appear in the correct order

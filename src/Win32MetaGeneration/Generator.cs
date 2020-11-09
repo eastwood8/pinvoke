@@ -205,7 +205,7 @@ namespace Win32MetaGeneration
                 return;
             }
 
-            MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null!);
+            MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
 
             var methodName = this.mr.GetString(methodDefinition.Name);
             if (this.IsAnsiFunction(methodDefinition, methodName))
@@ -439,7 +439,7 @@ namespace Win32MetaGeneration
             }
 
             MethodDefinition invokeMethodDef = typeDef.GetMethods().Select(this.mr.GetMethodDefinition).Single(def => this.mr.StringComparer.Equals(def.Name, "Invoke"));
-            MethodSignature<TypeSyntax> signature = invokeMethodDef.DecodeSignature(this.signatureTypeProvider, null!);
+            MethodSignature<TypeSyntax> signature = invokeMethodDef.DecodeSignature(this.signatureTypeProvider, null);
 
             DelegateDeclarationSyntax result = DelegateDeclaration(signature.ReturnType, name)
                 .WithParameterList(this.CreateParameterList(invokeMethodDef, signature))
@@ -493,7 +493,7 @@ namespace Win32MetaGeneration
                 }
                 else
                 {
-                    TypeSyntax fieldType = fieldDef.DecodeSignature(this.signatureTypeProvider, null!);
+                    TypeSyntax fieldType = fieldDef.DecodeSignature(this.signatureTypeProvider, null);
                     fieldType = this.ReinterpretType(fieldType, fieldDef.GetMarshallingDescriptor());
                     field = FieldDeclaration(VariableDeclaration(fieldType).AddVariables(fieldDeclarator))
                         .AddModifiers(Token(SyntaxKind.PublicKeyword));
@@ -552,7 +552,7 @@ namespace Win32MetaGeneration
                 ConstantHandle valueHandle = fieldDef.GetDefaultValue();
                 if (valueHandle.IsNil)
                 {
-                    enumBaseType = fieldDef.DecodeSignature(this.signatureTypeProvider, null!);
+                    enumBaseType = fieldDef.DecodeSignature(this.signatureTypeProvider, null);
                     continue;
                 }
 
