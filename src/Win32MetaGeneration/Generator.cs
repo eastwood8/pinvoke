@@ -26,6 +26,9 @@ namespace Win32MetaGeneration
         private const string SystemRuntimeInteropServices = "System.Runtime.InteropServices";
         private const string MicrosoftWindowsSdk = "Microsoft.Windows.Sdk";
         private const string RIAAFreeAttribute = "RIAAFreeAttribute";
+        private const string NativeTypeInfoAttribute = "NativeTypeInfoAttribute";
+        private static readonly TypeSyntax SafeHandleTypeSyntax = IdentifierName("SafeHandle");
+        private static readonly IdentifierNameSyntax IntPtrTypeSyntax = IdentifierName(nameof(IntPtr));
 
         /// <summary>
         /// This is the preferred capitalizations for modules and class names.
@@ -110,6 +113,8 @@ namespace Win32MetaGeneration
         private readonly Dictionary<TypeDefinitionHandle, TypeDefinitionHandle> nestedToDeclaringLookup = new Dictionary<TypeDefinitionHandle, TypeDefinitionHandle>();
 
         private readonly Dictionary<string, MethodDefinitionHandle> methodsByName;
+
+        private readonly Dictionary<string, TypeSyntax> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax>();
 
         internal Generator(string pathToMetaLibrary, LanguageVersion languageVersion = LanguageVersion.CSharp9)
         {
@@ -257,7 +262,7 @@ namespace Win32MetaGeneration
                 methodName = methodName.Substring(0, methodName.Length - 1);
             }
 
-            CustomAttributeHandleCollection returnTypeAttributes = default;
+            CustomAttributeHandleCollection? returnTypeAttributes = null;
             foreach (ParameterHandle parameterHandle in methodDefinition.GetParameters())
             {
                 var parameter = this.mr.GetParameter(parameterHandle);
@@ -273,7 +278,7 @@ namespace Win32MetaGeneration
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
                 List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName, entrypoint))),
                 modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword)),
-                this.ReinterpretType(signature.ReturnType, returnTypeAttributes),
+                returnTypeAttributes.HasValue ? this.ReinterpretType(signature.ReturnType, returnTypeAttributes.Value) : signature.ReturnType,
                 explicitInterfaceSpecifier: null!,
                 SafeIdentifier(methodName),
                 null!,
@@ -290,21 +295,22 @@ namespace Win32MetaGeneration
             methodsList.Add(methodDeclaration);
 
             // If RIAAFree applies, make sure we generate the close handle method.
-            string? freeMethodName = null;
-            foreach (CustomAttributeHandle attHandle in returnTypeAttributes)
+            if (returnTypeAttributes.HasValue)
             {
-                CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
-                if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
+                foreach (CustomAttributeHandle attHandle in returnTypeAttributes)
                 {
-                    var args = att.DecodeValue(this.customAttributeTypeProvider);
-                    freeMethodName = (string?)args.FixedArguments[0].Value;
-                    break;
-                }
-            }
+                    CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                    if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
+                    {
+                        var args = att.DecodeValue(this.customAttributeTypeProvider);
+                        if (args.FixedArguments[0].Value is string freeMethodName)
+                        {
+                            this.GenerateExternMethod(freeMethodName);
+                        }
 
-            if (freeMethodName is object)
-            {
-                this.GenerateExternMethod(freeMethodName);
+                        break;
+                    }
+                }
             }
         }
 
@@ -397,6 +403,88 @@ namespace Win32MetaGeneration
         }
 
         private static SyntaxToken SafeIdentifier(string name) => Identifier(CSharpKeywords.Contains(name) ? "@" + name : name);
+
+        private TypeSyntax GenerateSafeHandle(string releaseMethod)
+        {
+            if (this.releaseMethodsWithSafeHandleTypesGenerating.TryGetValue(releaseMethod, out TypeSyntax? safeHandleType))
+            {
+                return safeHandleType;
+            }
+
+            var releaseMethodHandle = this.methodsByName[releaseMethod];
+            string releaseMethodModule = this.GetNormalizedModuleName(this.mr.GetMethodDefinition(releaseMethodHandle).GetImport());
+            string safeHandleClassName = $"{releaseMethod}SafeHandle";
+
+            var members = new List<MemberDeclarationSyntax>();
+
+            MemberAccessExpressionSyntax thisHandle = MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, ThisExpression(), IdentifierName("handle"));
+            ExpressionSyntax intptrZero = DefaultExpression(IntPtrTypeSyntax);
+            ExpressionSyntax intptrMinusOne = ObjectCreationExpression(IntPtrTypeSyntax).AddArgumentListArguments(Argument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(-1))));
+
+            // private static readonly IntPtr INVALID_HANDLE_VALUE = new IntPtr(-1);
+            const string invalidValueFieldName = "INVALID_HANDLE_VALUE";
+            members.Add(FieldDeclaration(VariableDeclaration(IntPtrTypeSyntax).AddVariables(
+                VariableDeclarator(invalidValueFieldName).WithInitializer(EqualsValueClause(intptrMinusOne))))
+                .AddModifiers(Token(SyntaxKind.PrivateKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.ReadOnlyKeyword)));
+
+            // public SafeHandle() : base(INVALID_HANDLE_VALUE, true)
+            members.Add(ConstructorDeclaration(safeHandleClassName)
+                .WithInitializer(ConstructorInitializer(SyntaxKind.BaseConstructorInitializer, ArgumentList().AddArguments(
+                    Argument(IdentifierName(invalidValueFieldName)),
+                    Argument(LiteralExpression(SyntaxKind.TrueLiteralExpression)))))
+                .WithBody(Block()));
+
+            // public SafeHandle(IntPtr preexistingHandle, bool ownsHandle = true) : base(INVALID_HANDLE_VALUE, ownsHandle) { this.SetHandle(preexistingHandle); }
+            const string preexistingHandleName = "preexistingHandle";
+            const string ownsHandleName = "ownsHandle";
+            members.Add(ConstructorDeclaration(safeHandleClassName)
+                .AddParameterListParameters(
+                    Parameter(Identifier(preexistingHandleName)).WithType(IntPtrTypeSyntax),
+                    Parameter(Identifier(ownsHandleName)).WithType(PredefinedType(Token(SyntaxKind.BoolKeyword)))
+                        .WithDefault(EqualsValueClause(LiteralExpression(SyntaxKind.TrueLiteralExpression))))
+                .WithInitializer(ConstructorInitializer(SyntaxKind.BaseConstructorInitializer, ArgumentList().AddArguments(
+                    Argument(IdentifierName(invalidValueFieldName)),
+                    Argument(IdentifierName(ownsHandleName)))))
+                .WithBody(Block().AddStatements(
+                    ExpressionStatement(InvocationExpression(MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        ThisExpression(),
+                        IdentifierName("SetHandle"))).AddArgumentListArguments(
+                        Argument(IdentifierName(preexistingHandleName)))))));
+
+            // public override bool IsInvalid => this.handle == default || this.Handle == INVALID_HANDLE_VALUE;
+            members.Add(MethodDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), nameof(SafeHandle.IsInvalid))
+                .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.OverrideKeyword))
+                .WithExpressionBody(ArrowExpressionClause(
+                    BinaryExpression(
+                        SyntaxKind.LogicalOrExpression,
+                        BinaryExpression(SyntaxKind.EqualsExpression, thisHandle, intptrZero),
+                        BinaryExpression(SyntaxKind.EqualsExpression, thisHandle, IdentifierName(invalidValueFieldName)))))
+                .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)));
+
+            // protected override bool ReleaseHandle() => ReleaseMethod(this.handle);
+            members.Add(MethodDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), "ReleaseHandle")
+                .AddModifiers(Token(SyntaxKind.ProtectedKeyword), Token(SyntaxKind.OverrideKeyword))
+                .WithExpressionBody(ArrowExpressionClause(InvocationExpression(
+                        MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, IdentifierName(releaseMethodModule), IdentifierName(releaseMethod)),
+                        ArgumentList().AddArguments(Argument(thisHandle)))))
+                .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)));
+
+            ClassDeclarationSyntax safeHandleDeclaration = ClassDeclaration(safeHandleClassName)
+                .AddModifiers(Token(SyntaxKind.PublicKeyword))
+                .AddBaseListTypes(SimpleBaseType(SafeHandleTypeSyntax))
+                .AddMembers(members.ToArray())
+                .WithLeadingTrivia(ParseLeadingTrivia($@"/// <summary>
+        /// Represents a Win32 handle that can be closed with <see cref=""{releaseMethodModule}.{releaseMethod}""/>.
+        /// </summary>
+"));
+
+            this.GetModuleMemberList(releaseMethodModule).Add(safeHandleDeclaration);
+
+            safeHandleType = IdentifierName(safeHandleDeclaration.Identifier);
+            this.releaseMethodsWithSafeHandleTypesGenerating.Add(releaseMethod, safeHandleType);
+            return safeHandleType;
+        }
 
         private bool IsWideFunction(MethodDefinition method, string methodName)
         {
@@ -761,7 +849,7 @@ namespace Win32MetaGeneration
             foreach (CustomAttributeHandle attHandle in customAttributes)
             {
                 CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
-                if (this.IsAttribute(att, MicrosoftWindowsSdk, "NativeTypeInfoAttribute"))
+                if (this.IsAttribute(att, MicrosoftWindowsSdk, NativeTypeInfoAttribute))
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
                     if (args.FixedArguments[0].Value is object value)
@@ -792,6 +880,15 @@ namespace Win32MetaGeneration
                     }
 
                     break;
+                }
+
+                if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    if (args.FixedArguments[0].Value is string releaseMethod)
+                    {
+                        return this.GenerateSafeHandle(releaseMethod);
+                    }
                 }
             }
 
