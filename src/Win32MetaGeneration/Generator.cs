@@ -329,10 +329,17 @@ namespace Win32MetaGeneration
                 break;
             }
 
+            TypeSyntax returnType = signature.ReturnType;
+            AttributeSyntax? returnTypeAttribute = null;
+            if (returnTypeAttributes.HasValue)
+            {
+                (returnType, returnTypeAttribute) = this.ReinterpretMethodSignatureType(signature.ReturnType, returnTypeAttributes.Value);
+            }
+
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
                 List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName, entrypoint))),
                 modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword)),
-                returnTypeAttributes.HasValue ? this.ReinterpretType(signature.ReturnType, returnTypeAttributes.Value) : signature.ReturnType,
+                returnType,
                 explicitInterfaceSpecifier: null!,
                 SafeIdentifier(methodName),
                 null!,
@@ -340,6 +347,13 @@ namespace Win32MetaGeneration
                 List<TypeParameterConstraintClauseSyntax>(),
                 body: null!,
                 Token(SyntaxKind.SemicolonToken));
+            if (returnTypeAttribute is object)
+            {
+                methodDeclaration = methodDeclaration
+                    .AddAttributeLists(
+                    AttributeList().WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.ReturnKeyword))).AddAttributes(returnTypeAttribute));
+            }
+
             if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
             {
                 methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
@@ -456,6 +470,16 @@ namespace Win32MetaGeneration
                     SyntaxKind.SimpleMemberAccessExpression,
                     IdentifierName(nameof(CallingConvention)),
                     IdentifierName(Enum.GetName(typeof(CallingConvention), callingConvention)!))));
+        }
+
+        private static AttributeSyntax MarshalAs(UnmanagedType unmanagedType)
+        {
+            return Attribute(IdentifierName("MarshalAs"))
+                .AddArgumentListArguments(AttributeArgument(
+                    MemberAccessExpression(
+                        SyntaxKind.SimpleMemberAccessExpression,
+                        IdentifierName(nameof(UnmanagedType)),
+                        IdentifierName(Enum.GetName(typeof(UnmanagedType), unmanagedType)!))));
         }
 
         private static SyntaxToken SafeIdentifier(string name) => Identifier(CSharpKeywords.Contains(name) ? "@" + name : name);
@@ -701,7 +725,7 @@ namespace Win32MetaGeneration
                 else
                 {
                     TypeSyntax fieldType = fieldDef.DecodeSignature(this.signatureTypeProvider, null);
-                    fieldType = this.ReinterpretType(fieldType, fieldDef.GetCustomAttributes());
+                    fieldType = this.ReinterpretFieldType(fieldType, fieldDef.GetCustomAttributes());
                     field = FieldDeclaration(VariableDeclaration(fieldType).AddVariables(fieldDeclarator))
                         .AddModifiers(Token(SyntaxKind.PublicKeyword));
                     if (fieldType is PointerTypeSyntax)
@@ -865,11 +889,11 @@ namespace Win32MetaGeneration
             //   * Consider CredEnumerateA, which is a "pointer to an array of pointers" (3-asterisks!). How does FriendlyAttribute improve this, if at all? The memory must be freed through another p/invoke.
             // * Add [Friendly] attributes
             // * Notice [Out][RIAAFree] handle producing parameters. Can we make these provide SafeHandle's?
-            TypeSyntax type = this.ReinterpretType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetCustomAttributes());
+            var parameterInfo = this.ReinterpretMethodSignatureType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetCustomAttributes());
 
             // Determine the custom attributes to apply.
             var attributes = AttributeList();
-            if (type is PointerTypeSyntax)
+            if (parameterInfo.Type is PointerTypeSyntax)
             {
                 if ((parameter.Attributes & ParameterAttributes.In) == ParameterAttributes.In)
                 {
@@ -892,14 +916,20 @@ namespace Win32MetaGeneration
             ParameterSyntax parameterSyntax = Parameter(
                 attributes.Attributes.Count > 0 ? List<AttributeListSyntax>().Add(attributes) : List<AttributeListSyntax>(),
                 modifiers,
-                type,
+                parameterInfo.Type,
                 SafeIdentifier(name),
                 @default: null);
+
+            if (parameterInfo.MarshalAsAttribute is object)
+            {
+                parameterSyntax = parameterSyntax
+                    .AddAttributeLists(AttributeList().AddAttributes(parameterInfo.MarshalAsAttribute));
+            }
 
             return parameterSyntax;
         }
 
-        private TypeSyntax ReinterpretType(TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
+        private (TypeSyntax Type, AttributeSyntax? MarshalAsAttribute) ReinterpretMethodSignatureType(TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
         {
             foreach (CustomAttributeHandle attHandle in customAttributes)
             {
@@ -912,7 +942,61 @@ namespace Win32MetaGeneration
                         UnmanagedType unmanagedType = (UnmanagedType)value;
                         switch (unmanagedType)
                         {
-                            case UnmanagedType.Bool: return PredefinedType(Token(SyntaxKind.BoolKeyword));
+                            case UnmanagedType.Bool: return (PredefinedType(Token(SyntaxKind.BoolKeyword)), MarshalAs(unmanagedType));
+                            case UnmanagedType.LPWStr:
+                                if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
+                                {
+                                    return (PointerType(PredefinedType(Token(SyntaxKind.CharKeyword))), null);
+                                }
+
+                                break;
+
+                            case UnmanagedType.LPStr:
+                                if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.SByteKeyword } } })
+                                {
+                                    return (PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword))), null);
+                                }
+
+                                break;
+
+                            default:
+                                break;
+                        }
+                    }
+
+                    break;
+                }
+
+                if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    if (args.FixedArguments[0].Value is string releaseMethod)
+                    {
+                        return (this.GenerateSafeHandle(releaseMethod), null);
+                    }
+                }
+            }
+
+            return (originalType, null);
+        }
+
+        private TypeSyntax ReinterpretFieldType(TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
+        {
+            // For fields, we don't want to use MarshalAs attributes because that turns our structs into managed types,
+            // and thus cannot be used with pointers.
+            foreach (CustomAttributeHandle attHandle in customAttributes)
+            {
+                CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                if (this.IsAttribute(att, MicrosoftWindowsSdk, NativeTypeInfoAttribute))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    if (args.FixedArguments[0].Value is object value)
+                    {
+                        UnmanagedType unmanagedType = (UnmanagedType)value;
+                        switch (unmanagedType)
+                        {
+                            // Bool: consider change in interop size.
+                            ////case UnmanagedType.Bool: return PredefinedType(Token(SyntaxKind.IntKeyword));
                             case UnmanagedType.LPWStr:
                                 if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
                                 {
