@@ -252,22 +252,6 @@ namespace Win32MetaGeneration
                     continue;
                 }
 
-                bool isCompilerGenerated = false;
-                foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
-                {
-                    var att = this.mr.GetCustomAttribute(attHandle);
-                    if (this.IsAttribute(att, SystemRuntimeCompilerServices, nameof(CompilerGeneratedAttribute)))
-                    {
-                        isCompilerGenerated = true;
-                        break;
-                    }
-                }
-
-                if (isCompilerGenerated)
-                {
-                    continue;
-                }
-
                 this.GenerateInteropType(typeDefinitionHandle);
             }
         }
@@ -498,6 +482,22 @@ namespace Win32MetaGeneration
 
         private static string GetHiddenFieldName(string fieldName) => $"__{fieldName}";
 
+        private bool IsCompilerGenerated(TypeDefinition typeDef)
+        {
+            bool isCompilerGenerated = false;
+            foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
+            {
+                var att = this.mr.GetCustomAttribute(attHandle);
+                if (this.IsAttribute(att, SystemRuntimeCompilerServices, nameof(CompilerGeneratedAttribute)))
+                {
+                    isCompilerGenerated = true;
+                    break;
+                }
+            }
+
+            return isCompilerGenerated;
+        }
+
         private TypeSyntax GenerateSafeHandle(string releaseMethod)
         {
             if (this.releaseMethodsWithSafeHandleTypesGenerating.TryGetValue(releaseMethod, out TypeSyntax? safeHandleType))
@@ -609,6 +609,11 @@ namespace Win32MetaGeneration
         private MemberDeclarationSyntax? CreateInteropType(TypeDefinitionHandle typeDefHandle)
         {
             TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefHandle);
+            if (this.IsCompilerGenerated(typeDef))
+            {
+                return null;
+            }
+
             var baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
             MemberDeclarationSyntax typeDeclaration;
 
