@@ -5,7 +5,6 @@ namespace Win32MetaGeneration
 {
     using System;
     using System.Collections.Generic;
-    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Reflection;
@@ -17,16 +16,21 @@ namespace Win32MetaGeneration
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
-    using Microsoft.CodeAnalysis.Editing;
     using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
     internal class Generator : IDisposable
     {
+        internal static readonly Dictionary<string, TypeSyntax> BclInteropStructs = new Dictionary<string, TypeSyntax>(StringComparer.Ordinal)
+        {
+            { nameof(System.Runtime.InteropServices.ComTypes.FILETIME), ParseTypeName("System.Runtime.InteropServices.ComTypes.FILETIME") },
+        };
+
         private const string SystemRuntimeCompilerServices = "System.Runtime.CompilerServices";
         private const string SystemRuntimeInteropServices = "System.Runtime.InteropServices";
         private const string MicrosoftWindowsSdk = "Microsoft.Windows.Sdk";
         private const string RIAAFreeAttribute = "RIAAFreeAttribute";
         private const string NativeTypeInfoAttribute = "NativeTypeInfoAttribute";
+
         private static readonly TypeSyntax SafeHandleTypeSyntax = IdentifierName("SafeHandle");
         private static readonly IdentifierNameSyntax IntPtrTypeSyntax = IdentifierName(nameof(IntPtr));
 
