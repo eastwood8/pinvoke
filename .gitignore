@@ -7,6 +7,7 @@
 *.rsuser
 *.suo
 *.user
+launchSettings.json
 *.userosscache
 *.sln.docstates
 
