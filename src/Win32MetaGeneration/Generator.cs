@@ -377,6 +377,13 @@ namespace Win32MetaGeneration
                         .WithNameEquals(NameEquals(nameof(DllImportAttribute.EntryPoint))));
             }
 
+            if ((import.Attributes & MethodImportAttributes.SetLastError) == MethodImportAttributes.SetLastError)
+            {
+                dllImportAttribute = dllImportAttribute.AddArgumentListArguments(
+                    AttributeArgument(LiteralExpression(SyntaxKind.TrueLiteralExpression))
+                        .WithNameEquals(NameEquals(nameof(DllImportAttribute.SetLastError))));
+            }
+
             return dllImportAttribute;
         }
 
