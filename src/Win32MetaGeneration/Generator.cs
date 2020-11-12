@@ -5,6 +5,7 @@ namespace Win32MetaGeneration
 {
     using System;
     using System.Collections.Generic;
+    using System.Diagnostics;
     using System.IO;
     using System.Linq;
     using System.Reflection;
@@ -195,6 +196,7 @@ namespace Win32MetaGeneration
                         .AddMembers(this.types.Values.ToArray())
                 .AddUsings(
                     UsingDirective(IdentifierName(nameof(System))),
+                    UsingDirective(IdentifierName(nameof(System) + "." + nameof(System.Diagnostics))),
                     UsingDirective(ParseName(SystemRuntimeInteropServices)))
                 .NormalizeWhitespace();
         }
@@ -482,7 +484,19 @@ namespace Win32MetaGeneration
                         IdentifierName(Enum.GetName(typeof(UnmanagedType), unmanagedType)!))));
         }
 
+        private static AttributeSyntax DebuggerBrowsable(DebuggerBrowsableState state)
+        {
+            return Attribute(IdentifierName("DebuggerBrowsable"))
+                .AddArgumentListArguments(
+                AttributeArgument(MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    IdentifierName(nameof(DebuggerBrowsableState)),
+                    IdentifierName(Enum.GetName(typeof(DebuggerBrowsableState), state)!))));
+        }
+
         private static SyntaxToken SafeIdentifier(string name) => Identifier(CSharpKeywords.Contains(name) ? "@" + name : name);
+
+        private static string GetHiddenFieldName(string fieldName) => $"__{fieldName}";
 
         private TypeSyntax GenerateSafeHandle(string releaseMethod)
         {
@@ -724,11 +738,23 @@ namespace Win32MetaGeneration
                 }
                 else
                 {
-                    TypeSyntax fieldType = fieldDef.DecodeSignature(this.signatureTypeProvider, null);
-                    fieldType = this.ReinterpretFieldType(fieldType, fieldDef.GetCustomAttributes());
-                    field = FieldDeclaration(VariableDeclaration(fieldType).AddVariables(fieldDeclarator))
-                        .AddModifiers(Token(SyntaxKind.PublicKeyword));
-                    if (fieldType is PointerTypeSyntax)
+                    var fieldInfo = this.ReinterpretFieldType(fieldDeclarator.Identifier.ValueText, fieldDef.DecodeSignature(this.signatureTypeProvider, null), fieldDef.GetCustomAttributes());
+                    if (fieldInfo.Property is object)
+                    {
+                        fieldDeclarator = fieldDeclarator.WithIdentifier(Identifier(GetHiddenFieldName(fieldDeclarator.Identifier.ValueText)));
+
+                        members.Add(fieldInfo.Property);
+                    }
+
+                    field = FieldDeclaration(VariableDeclaration(fieldInfo.FieldType).AddVariables(fieldDeclarator))
+                        .AddModifiers(Token(fieldInfo.Property is object ? SyntaxKind.PrivateKeyword : SyntaxKind.PublicKeyword));
+
+                    if (fieldInfo.Property is object)
+                    {
+                        field = field.AddAttributeLists(AttributeList().AddAttributes(DebuggerBrowsable(DebuggerBrowsableState.Never)));
+                    }
+
+                    if (fieldInfo.FieldType is PointerTypeSyntax)
                     {
                         field = field.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
                     }
@@ -980,7 +1006,7 @@ namespace Win32MetaGeneration
             return (originalType, null);
         }
 
-        private TypeSyntax ReinterpretFieldType(TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
+        private (TypeSyntax FieldType, PropertyDeclarationSyntax? Property) ReinterpretFieldType(string fieldName, TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
         {
             // For fields, we don't want to use MarshalAs attributes because that turns our structs into managed types,
             // and thus cannot be used with pointers.
@@ -995,12 +1021,36 @@ namespace Win32MetaGeneration
                         UnmanagedType unmanagedType = (UnmanagedType)value;
                         switch (unmanagedType)
                         {
-                            // Bool: consider change in interop size.
-                            ////case UnmanagedType.Bool: return PredefinedType(Token(SyntaxKind.IntKeyword));
+                            case UnmanagedType.Bool:
+                                // The native memory is 4 bytes long, so we can't use C# bool which is just 1 byte long.
+                                // Use int for the field, and generate a property accessor.
+                                ExpressionSyntax hiddenFieldAccess = MemberAccessExpression(
+                                    SyntaxKind.SimpleMemberAccessExpression,
+                                    ThisExpression(),
+                                    IdentifierName(GetHiddenFieldName(fieldName)));
+                                var property = PropertyDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), fieldName)
+                                    .AddModifiers(Token(SyntaxKind.PublicKeyword))
+                                    .AddAccessorListAccessors(
+                                        AccessorDeclaration(SyntaxKind.GetAccessorDeclaration)
+                                            .WithExpressionBody(ArrowExpressionClause(BinaryExpression(
+                                                SyntaxKind.NotEqualsExpression,
+                                                hiddenFieldAccess,
+                                                LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0)))))
+                                            .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)),
+                                        AccessorDeclaration(SyntaxKind.SetAccessorDeclaration)
+                                            .WithExpressionBody(ArrowExpressionClause(AssignmentExpression(
+                                                SyntaxKind.SimpleAssignmentExpression,
+                                                hiddenFieldAccess,
+                                                ConditionalExpression(
+                                                    IdentifierName("value"),
+                                                    LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(1)),
+                                                    LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0))))))
+                                            .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)));
+                                return (originalType, property);
                             case UnmanagedType.LPWStr:
                                 if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
                                 {
-                                    return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
+                                    return (PointerType(PredefinedType(Token(SyntaxKind.CharKeyword))), null);
                                 }
 
                                 break;
@@ -1008,7 +1058,7 @@ namespace Win32MetaGeneration
                             case UnmanagedType.LPStr:
                                 if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.SByteKeyword } } })
                                 {
-                                    return PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword)));
+                                    return (PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword))), null);
                                 }
 
                                 break;
@@ -1020,18 +1070,9 @@ namespace Win32MetaGeneration
 
                     break;
                 }
-
-                if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
-                {
-                    var args = att.DecodeValue(this.customAttributeTypeProvider);
-                    if (args.FixedArguments[0].Value is string releaseMethod)
-                    {
-                        return this.GenerateSafeHandle(releaseMethod);
-                    }
-                }
             }
 
-            return originalType;
+            return (originalType, null);
         }
 
         private UnmanagedType? GetUnmanagedType(BlobHandle blobHandle)
