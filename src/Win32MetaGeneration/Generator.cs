@@ -609,7 +609,6 @@ namespace Win32MetaGeneration
         {
             // TODO: Add handling for
             // * property indexers (e.g. FILE_REGION_OUTPUT._Region_e__FixedBuffer.this[int]
-            // * record GuidAttribute
             string name = this.mr.GetString(typeDef.Name);
 
             var members = new List<MemberDeclarationSyntax>();
