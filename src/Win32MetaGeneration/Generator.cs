@@ -251,11 +251,6 @@ namespace Win32MetaGeneration
 
         internal void GenerateInteropType(TypeDefinitionHandle typeDefHandle)
         {
-            if (this.mr.StringComparer.Equals(this.mr.GetTypeDefinition(typeDefHandle).Name, "FILE_REGION_OUTPUT"))
-            {
-                Debugger.Break();
-            }
-
             if (this.nestedToDeclaringLookup.TryGetValue(typeDefHandle, out TypeDefinitionHandle nestingParentHandle))
             {
                 // We should only generate this type into its parent type.
@@ -365,6 +360,7 @@ namespace Win32MetaGeneration
 
         private MemberDeclarationSyntax? CreateInteropType(TypeDefinitionHandle typeDefHandle)
         {
+            Debug.Assert(!typeDefHandle.IsNil);
             TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefHandle);
             var baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
             MemberDeclarationSyntax typeDeclaration;
@@ -417,8 +413,11 @@ namespace Win32MetaGeneration
                 TypeDefinition typeDefinition = this.mr.GetTypeDefinition(parentHandle);
                 foreach (TypeDefinitionHandle nestedHandle in typeDefinition.GetNestedTypes())
                 {
-                    this.nestedToDeclaringLookup.Add(nestedHandle, parentHandle);
-                    AddNestedTypesOf(nestedHandle);
+                    if (!nestedHandle.IsNil)
+                    {
+                        this.nestedToDeclaringLookup.Add(nestedHandle, parentHandle);
+                        AddNestedTypesOf(nestedHandle);
+                    }
                 }
             }
         }
@@ -494,7 +493,7 @@ namespace Win32MetaGeneration
                 else
                 {
                     TypeSyntax fieldType = fieldDef.DecodeSignature(this.signatureTypeProvider, null);
-                    fieldType = this.ReinterpretType(fieldType, fieldDef.GetMarshallingDescriptor());
+                    fieldType = this.ReinterpretType(fieldType, fieldDef.GetCustomAttributes());
                     field = FieldDeclaration(VariableDeclaration(fieldType).AddVariables(fieldDeclarator))
                         .AddModifiers(Token(SyntaxKind.PublicKeyword));
                     if (fieldType is PointerTypeSyntax)
@@ -597,9 +596,27 @@ namespace Win32MetaGeneration
 
         private bool IsAttribute(CustomAttribute attribute, string ns, string name)
         {
-            MemberReference memberReference = this.mr.GetMemberReference((MemberReferenceHandle)attribute.Constructor);
-            TypeReference parentRef = this.mr.GetTypeReference((TypeReferenceHandle)memberReference.Parent);
-            return this.mr.StringComparer.Equals(parentRef.Name, name) && this.mr.StringComparer.Equals(parentRef.Namespace, ns);
+            StringHandle actualNamespace, actualName;
+            if (attribute.Constructor.Kind == HandleKind.MemberReference)
+            {
+                MemberReference memberReference = this.mr.GetMemberReference((MemberReferenceHandle)attribute.Constructor);
+                TypeReference parentRef = this.mr.GetTypeReference((TypeReferenceHandle)memberReference.Parent);
+                actualNamespace = parentRef.Namespace;
+                actualName = parentRef.Name;
+            }
+            else if (attribute.Constructor.Kind == HandleKind.MethodDefinition)
+            {
+                MethodDefinition methodDef = this.mr.GetMethodDefinition((MethodDefinitionHandle)attribute.Constructor);
+                TypeDefinition typeDef = this.mr.GetTypeDefinition(methodDef.GetDeclaringType());
+                actualNamespace = typeDef.Namespace;
+                actualName = typeDef.Name;
+            }
+            else
+            {
+                throw new NotSupportedException("Unsupported attribute constructor kind: " + attribute.Constructor.Kind);
+            }
+
+            return this.mr.StringComparer.Equals(actualName, name) && this.mr.StringComparer.Equals(actualNamespace, ns);
         }
 
         private List<MemberDeclarationSyntax> GetModuleMemberList(string moduleName)
@@ -636,7 +653,7 @@ namespace Win32MetaGeneration
             //   * Consider CredEnumerateA, which is a "pointer to an array of pointers" (3-asterisks!). How does FriendlyAttribute improve this, if at all? The memory must be freed through another p/invoke.
             // * Add [Friendly] attributes
             // * Notice [Out][RIAAFree] handle producing parameters. Can we make these provide SafeHandle's?
-            TypeSyntax type = this.ReinterpretType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetMarshallingDescriptor());
+            TypeSyntax type = this.ReinterpretType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetCustomAttributes());
 
             // Determine the custom attributes to apply.
             var attributes = AttributeList();
@@ -670,20 +687,39 @@ namespace Win32MetaGeneration
             return parameterSyntax;
         }
 
-        private TypeSyntax ReinterpretType(TypeSyntax originalType, BlobHandle marshallingDescriptor)
+        private TypeSyntax ReinterpretType(TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
         {
-            UnmanagedType? unmanagedType = this.GetUnmanagedType(marshallingDescriptor);
-            if (unmanagedType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
+            foreach (CustomAttributeHandle attHandle in customAttributes)
             {
-                return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
-            }
-
-            if (unmanagedType == UnmanagedType.LPArray)
-            {
-                MarshalAsAttribute marshalAs = this.ToMarshalAsAttribute(marshallingDescriptor);
-                if (marshalAs.ArraySubType == UnmanagedType.LPWStr && originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
+                CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                if (this.IsAttribute(att, "Microsoft.Windows.Sdk", "NativeTypeInfoAttribute"))
                 {
-                    return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    UnmanagedType unmanagedType = (UnmanagedType)args.FixedArguments[0].Value;
+                    switch (unmanagedType)
+                    {
+                        case UnmanagedType.Bool: return PredefinedType(Token(SyntaxKind.BoolKeyword));
+                        case UnmanagedType.LPWStr:
+                            if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
+                            {
+                                return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
+                            }
+
+                            break;
+
+                        case UnmanagedType.LPStr:
+                            if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.SByteKeyword } } })
+                            {
+                                return PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword)));
+                            }
+
+                            break;
+
+                        default:
+                            break;
+                    }
+
+                    break;
                 }
             }
 
