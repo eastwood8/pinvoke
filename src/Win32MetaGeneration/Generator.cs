@@ -41,41 +41,85 @@ namespace Win32MetaGeneration
         private static readonly HashSet<string> CanonicalCapitalizations = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             "AdvApi32",
+            "AuthZ",
             "BCrypt",
             "Cabinet",
             "CfgMgr32",
+            "Chakra",
             "CodeGeneration",
             "CodeGeneration.Debugging",
             "CodeGenerationAttributes",
+            "ComCtl32",
+            "ComDlg32",
             "Crypt32",
+            "CryptNet",
+            "D3D11",
+            "D3D12",
+            "D3DCompiler_47",
             "DbgHelp",
+            "DfsCli",
+            "DhcpCSvc",
+            "DhcpCSvc6",
+            "DnsApi",
+            "DsParse",
+            "DSRole",
             "DwmApi",
+            "DXGI",
+            "Esent",
+            "FltLib",
             "Fusion",
             "Gdi32",
             "Hid",
+            "Icu",
             "ImageHlp",
+            "InkObjCore",
             "IPHlpApi",
             "Kernel32",
+            "LogonCli",
             "Magnification",
+            "MFSensorGroup",
+            "Mpr",
+            "MSCms",
             "MSCorEE",
             "Msi",
+            "MswSock",
             "NCrypt",
             "NetApi32",
+            "NetUtils",
             "NewDev",
             "NTDll",
             "Ole32",
+            "OleAut32",
+            "PowrProf",
+            "PropSys",
             "Psapi",
+            "RpcRT4",
+            "SamCli",
+            "SchedCli",
             "SetupApi",
             "SHCore",
             "Shell32",
+            "ShlwApi",
+            "SrvCli",
+            "TokenBinding",
+            "UrlMon",
             "User32",
-            "Userenv",
+            "UserEnv",
             "UxTheme",
+            "Version",
+            "WebAuthN",
+            "WebServices",
+            "WebSocket",
             "Win32",
             "Win32MetaGeneration",
             "Windows.Core",
             "Windows.ShellScalingApi",
+            "WinHttp",
+            "WinMM",
             "WinUsb",
+            "WksCli",
+            "WLanApi",
+            "WldAp32",
             "WtsApi32",
         };
 
@@ -144,10 +188,10 @@ namespace Win32MetaGeneration
         internal CompilationUnitSyntax CompilationUnit
         {
             get => CompilationUnit()
-                .AddMembers(this.modulesAndMembers.Select(kv =>
-                    ClassDeclaration(Identifier(kv.Key))
+                .AddMembers(this.MembersByClass.Select(kv =>
+                    ClassDeclaration(Identifier(GetClassNameForModule(kv.Key)))
                         .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
-                        .AddMembers(kv.Value.ToArray())).ToArray())
+                        .AddMembers(kv.ToArray())).ToArray())
                         .AddMembers(this.types.Values.ToArray())
                 .AddUsings(
                     UsingDirective(IdentifierName(nameof(System))),
@@ -160,6 +204,12 @@ namespace Win32MetaGeneration
         internal MetadataReader Reader => this.mr;
 
         internal LanguageVersion LanguageVersion { get; }
+
+        private IEnumerable<IGrouping<string, MemberDeclarationSyntax>> MembersByClass =>
+            from entry in this.modulesAndMembers
+            from method in entry.Value
+            group method by entry.Key.StartsWith("api-") || entry.Key.StartsWith("ext-") ? "ApiSets" : entry.Key into x
+            select x;
 
         public void Dispose()
         {
@@ -339,6 +389,8 @@ namespace Win32MetaGeneration
                 this.types.Add(typeDefHandle, typeDeclaration);
             }
         }
+
+        private static string GetClassNameForModule(string moduleName) => moduleName.Replace('-', '_');
 
         private static AttributeSyntax FieldOffset(int offset) => FieldOffsetAttributeSyntax.AddArgumentListArguments(AttributeArgument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(offset))));
 
