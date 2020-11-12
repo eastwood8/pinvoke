@@ -22,6 +22,10 @@ namespace Win32MetaGeneration
 
     internal class Generator : IDisposable
     {
+        private const string SystemRuntimeCompilerServices = "System.Runtime.CompilerServices";
+        private const string SystemRuntimeInteropServices = "System.Runtime.InteropServices";
+        private const string MicrosoftWindowsSdk = "Microsoft.Windows.Sdk";
+
         /// <summary>
         /// This is the preferred capitalizations for modules and class names.
         /// If they are not in this list, the capitalization will come from the metadata assembly.
@@ -115,7 +119,7 @@ namespace Win32MetaGeneration
             this.signatureTypeProvider = new SignatureTypeProvider(this);
             this.customAttributeTypeProvider = new CustomAttributeTypeProvider();
 
-            this.Apis = this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, "Microsoft.Windows.Sdk"));
+            this.Apis = this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, MicrosoftWindowsSdk));
             this.InitializeNestedToDeclaringLookupDictionary();
         }
 
@@ -129,7 +133,7 @@ namespace Win32MetaGeneration
                         .AddMembers(this.types.Values.ToArray())
                 .AddUsings(
                     UsingDirective(IdentifierName(nameof(System))),
-                    UsingDirective(ParseName("System.Runtime.InteropServices")))
+                    UsingDirective(ParseName(SystemRuntimeInteropServices)))
                 .NormalizeWhitespace();
         }
 
@@ -183,7 +187,7 @@ namespace Win32MetaGeneration
                 foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
                 {
                     var att = this.mr.GetCustomAttribute(attHandle);
-                    if (this.IsAttribute(att, "System.Runtime.CompilerServices", nameof(CompilerGeneratedAttribute)))
+                    if (this.IsAttribute(att, SystemRuntimeCompilerServices, nameof(CompilerGeneratedAttribute)))
                     {
                         isCompilerGenerated = true;
                         break;
@@ -432,7 +436,7 @@ namespace Win32MetaGeneration
             foreach (CustomAttributeHandle handle in typeDef.GetCustomAttributes())
             {
                 var att = this.mr.GetCustomAttribute(handle);
-                if (this.IsAttribute(att, "System.Runtime.InteropServices", nameof(UnmanagedFunctionPointerAttribute)))
+                if (this.IsAttribute(att, SystemRuntimeInteropServices, nameof(UnmanagedFunctionPointerAttribute)))
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
                     callingConvention = (CallingConvention)(int)args.FixedArguments[0].Value!;
@@ -471,7 +475,7 @@ namespace Win32MetaGeneration
                 foreach (CustomAttributeHandle attHandle in fieldDef.GetCustomAttributes())
                 {
                     CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
-                    if (this.IsAttribute(att, "System.Runtime.CompilerServices", nameof(FixedBufferAttribute)))
+                    if (this.IsAttribute(att, SystemRuntimeCompilerServices, nameof(FixedBufferAttribute)))
                     {
                         fixedBufferAttribute = att;
                         break;
@@ -527,7 +531,7 @@ namespace Win32MetaGeneration
             foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
             {
                 CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
-                if (this.IsAttribute(att, "System.Runtime.InteropServices", nameof(GuidAttribute)))
+                if (this.IsAttribute(att, SystemRuntimeInteropServices, nameof(GuidAttribute)))
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
                     guid = Guid.Parse((string)args.FixedArguments[0].Value!);
@@ -544,6 +548,17 @@ namespace Win32MetaGeneration
 
         private EnumDeclarationSyntax CreateInteropEnum(TypeDefinition typeDef)
         {
+            bool flagsEnum = false;
+            foreach (CustomAttributeHandle attributeHandle in typeDef.GetCustomAttributes())
+            {
+                CustomAttribute attribute = this.mr.GetCustomAttribute(attributeHandle);
+                if (this.IsAttribute(attribute, nameof(System), "FlagsAttribute"))
+                {
+                    flagsEnum = true;
+                    break;
+                }
+            }
+
             var enumValues = new List<EnumMemberDeclarationSyntax>();
             TypeSyntax? enumBaseType = null;
             foreach (FieldDefinitionHandle fieldDefHandle in typeDef.GetFields())
@@ -558,23 +573,12 @@ namespace Win32MetaGeneration
                 }
 
                 Constant value = this.mr.GetConstant(valueHandle);
-                enumValues.Add(EnumMemberDeclaration(SafeIdentifier(enumValueName)).WithEqualsValue(EqualsValueClause(this.ToExpressionSyntax(value))));
+                enumValues.Add(EnumMemberDeclaration(SafeIdentifier(enumValueName)).WithEqualsValue(EqualsValueClause(flagsEnum ? this.ToHexExpressionSyntax(value) : this.ToExpressionSyntax(value))));
             }
 
             if (enumBaseType is null)
             {
                 throw new NotSupportedException("Unknown enum type.");
-            }
-
-            bool flagsEnum = false;
-            foreach (CustomAttributeHandle attributeHandle in typeDef.GetCustomAttributes())
-            {
-                CustomAttribute attribute = this.mr.GetCustomAttribute(attributeHandle);
-                if (this.IsAttribute(attribute, nameof(System), "FlagsAttribute"))
-                {
-                    flagsEnum = true;
-                    break;
-                }
             }
 
             var name = this.mr.GetString(typeDef.Name);
@@ -694,7 +698,7 @@ namespace Win32MetaGeneration
             foreach (CustomAttributeHandle attHandle in customAttributes)
             {
                 CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
-                if (this.IsAttribute(att, "Microsoft.Windows.Sdk", "NativeTypeInfoAttribute"))
+                if (this.IsAttribute(att, MicrosoftWindowsSdk, "NativeTypeInfoAttribute"))
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
                     if (args.FixedArguments[0].Value is object value)
@@ -875,6 +879,32 @@ namespace Win32MetaGeneration
                 ConstantTypeCode.String => blobReader.ReadSerializedString() is string value ? LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(value)) : LiteralExpression(SyntaxKind.NullLiteralExpression),
                 _ => throw new NotSupportedException("ConstantTypeCode not supported: " + constant.TypeCode),
             };
+        }
+
+        private ExpressionSyntax ToHexExpressionSyntax(Constant constant)
+        {
+            var blobReader = this.mr.GetBlobReader(constant.Value);
+            var blobReader2 = this.mr.GetBlobReader(constant.Value);
+            return constant.TypeCode switch
+            {
+                ConstantTypeCode.SByte => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadSByte()), blobReader2.ReadSByte())),
+                ConstantTypeCode.Byte => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadByte()), blobReader2.ReadByte())),
+                ConstantTypeCode.Int16 => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadInt16()), blobReader2.ReadInt16())),
+                ConstantTypeCode.UInt16 => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadUInt16()), blobReader2.ReadUInt16())),
+                ConstantTypeCode.Int32 => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadInt32()), blobReader2.ReadInt32())),
+                ConstantTypeCode.UInt32 => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadUInt32()), blobReader2.ReadUInt32())),
+                ConstantTypeCode.Int64 => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadInt64()), blobReader2.ReadInt64())),
+                ConstantTypeCode.UInt64 => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(ToHex(blobReader.ReadUInt64()), blobReader2.ReadUInt64())),
+                _ => throw new NotSupportedException("ConstantTypeCode not supported: " + constant.TypeCode),
+            };
+
+            unsafe string ToHex<T>(T value)
+                where T : unmanaged
+            {
+                int fullHexLength = sizeof(T) * 2;
+                string hex = string.Format("0x{0:X" + fullHexLength + "}", value);
+                return hex;
+            }
         }
     }
 }
