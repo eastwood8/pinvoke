@@ -25,6 +25,7 @@ namespace Win32MetaGeneration
         private const string SystemRuntimeCompilerServices = "System.Runtime.CompilerServices";
         private const string SystemRuntimeInteropServices = "System.Runtime.InteropServices";
         private const string MicrosoftWindowsSdk = "Microsoft.Windows.Sdk";
+        private const string RIAAFreeAttribute = "RIAAFreeAttribute";
 
         /// <summary>
         /// This is the preferred capitalizations for modules and class names.
@@ -97,11 +98,18 @@ namespace Win32MetaGeneration
         private readonly Dictionary<TypeDefinitionHandle, MemberDeclarationSyntax> types = new Dictionary<TypeDefinitionHandle, MemberDeclarationSyntax>();
 
         /// <summary>
-        /// The set of types currently being generated so we don't stack overflow for self-referencing types.
+        /// The set of types that are or have been generated so we don't stack overflow for self-referencing types.
         /// </summary>
         private readonly HashSet<TypeDefinitionHandle> typesGenerating = new HashSet<TypeDefinitionHandle>();
 
+        /// <summary>
+        /// The set of methods that are or have been generated.
+        /// </summary>
+        private readonly HashSet<MethodDefinitionHandle> methodsGenerating = new HashSet<MethodDefinitionHandle>();
+
         private readonly Dictionary<TypeDefinitionHandle, TypeDefinitionHandle> nestedToDeclaringLookup = new Dictionary<TypeDefinitionHandle, TypeDefinitionHandle>();
+
+        private readonly Dictionary<string, MethodDefinitionHandle> methodsByName;
 
         internal Generator(string pathToMetaLibrary, LanguageVersion languageVersion = LanguageVersion.CSharp9)
         {
@@ -121,6 +129,7 @@ namespace Win32MetaGeneration
 
             this.Apis = this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, MicrosoftWindowsSdk));
             this.InitializeNestedToDeclaringLookupDictionary();
+            this.methodsByName = this.Apis.GetMethods().ToDictionary(h => this.mr.GetString(this.mr.GetMethodDefinition(h).Name), StringComparer.Ordinal);
         }
 
         internal CompilationUnitSyntax CompilationUnit
@@ -168,8 +177,7 @@ namespace Win32MetaGeneration
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
-                var methodDefinition = this.mr.GetMethodDefinition(methodHandle);
-                this.GenerateExternMethod(methodDefinition);
+                this.GenerateExternMethod(methodHandle);
             }
         }
 
@@ -203,8 +211,21 @@ namespace Win32MetaGeneration
             }
         }
 
-        internal void GenerateExternMethod(MethodDefinition methodDefinition)
+        internal void GenerateExternMethod(string name) => this.GenerateExternMethod(this.methodsByName[name]);
+
+        internal void GenerateExternMethod(MethodDefinitionHandle methodDefinitionHandle)
         {
+            if (methodDefinitionHandle.IsNil)
+            {
+                return;
+            }
+
+            if (!this.methodsGenerating.Add(methodDefinitionHandle))
+            {
+                return;
+            }
+
+            MethodDefinition methodDefinition = this.mr.GetMethodDefinition(methodDefinitionHandle);
             MethodImport import = methodDefinition.GetImport();
             if (import.Name.IsNil)
             {
@@ -236,10 +257,23 @@ namespace Win32MetaGeneration
                 methodName = methodName.Substring(0, methodName.Length - 1);
             }
 
+            CustomAttributeHandleCollection returnTypeAttributes = default;
+            foreach (ParameterHandle parameterHandle in methodDefinition.GetParameters())
+            {
+                var parameter = this.mr.GetParameter(parameterHandle);
+                if (parameter.Name.IsNil)
+                {
+                    returnTypeAttributes = parameter.GetCustomAttributes();
+                }
+
+                // What we're looking for would always be the first element in the collection.
+                break;
+            }
+
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
                 List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName, entrypoint))),
                 modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword)),
-                signature.ReturnType,
+                this.ReinterpretType(signature.ReturnType, returnTypeAttributes),
                 explicitInterfaceSpecifier: null!,
                 SafeIdentifier(methodName),
                 null!,
@@ -254,6 +288,24 @@ namespace Win32MetaGeneration
 
             List<MemberDeclarationSyntax> methodsList = this.GetModuleMemberList(moduleName);
             methodsList.Add(methodDeclaration);
+
+            // If RIAAFree applies, make sure we generate the close handle method.
+            string? freeMethodName = null;
+            foreach (CustomAttributeHandle attHandle in returnTypeAttributes)
+            {
+                CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    freeMethodName = (string?)args.FixedArguments[0].Value;
+                    break;
+                }
+            }
+
+            if (freeMethodName is object)
+            {
+                this.GenerateExternMethod(freeMethodName);
+            }
         }
 
         internal void GenerateInteropType(TypeDefinitionHandle typeDefHandle)

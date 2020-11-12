@@ -37,16 +37,9 @@ namespace Win32MetaGeneration
                 var generator = new Generator(pathToMetaLibrary, LanguageVersion.CSharp9);
                 if (args.Length > 0)
                 {
-                    foreach (MethodDefinitionHandle methodHandle in generator.Apis.GetMethods())
+                    foreach (string name in args)
                     {
-                        var methodDef = generator.Reader.GetMethodDefinition(methodHandle);
-                        foreach (string name in args)
-                        {
-                            if (generator.Reader.StringComparer.Equals(methodDef.Name, name))
-                            {
-                                generator.GenerateExternMethod(methodDef);
-                            }
-                        }
+                        generator.GenerateExternMethod(name);
                     }
                 }
                 else
