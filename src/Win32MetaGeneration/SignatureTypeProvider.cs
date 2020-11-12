@@ -14,14 +14,10 @@ namespace Win32MetaGeneration
 
     internal class SignatureTypeProvider : ISignatureTypeProvider<TypeSyntax, IGenericContext?>
     {
-        private static readonly TypeSyntax IntPtrTypeSyntax = IdentifierName(nameof(IntPtr));
-        private static readonly TypeSyntax UIntPtrTypeSyntax = IdentifierName(nameof(UIntPtr));
-        private readonly CSharpCompilation compilation;
         private readonly Generator owner;
 
-        internal SignatureTypeProvider(CSharpCompilation compilation, Generator owner)
+        internal SignatureTypeProvider(Generator owner)
         {
-            this.compilation = compilation;
             this.owner = owner;
         }
 
@@ -45,8 +41,8 @@ namespace Win32MetaGeneration
                 PrimitiveTypeCode.Double => PredefinedType(Token(SyntaxKind.DoubleKeyword)),
                 PrimitiveTypeCode.Object => PredefinedType(Token(SyntaxKind.ObjectKeyword)),
                 PrimitiveTypeCode.String => PredefinedType(Token(SyntaxKind.StringKeyword)),
-                PrimitiveTypeCode.IntPtr => IntPtrTypeSyntax,
-                PrimitiveTypeCode.UIntPtr => UIntPtrTypeSyntax,
+                PrimitiveTypeCode.IntPtr => this.owner.LanguageVersion >= LanguageVersion.CSharp9 ? IdentifierName("nint") : IdentifierName(nameof(IntPtr)),
+                PrimitiveTypeCode.UIntPtr => this.owner.LanguageVersion >= LanguageVersion.CSharp9 ? IdentifierName("nuint") : IdentifierName(nameof(UIntPtr)),
                 PrimitiveTypeCode.Void => PredefinedType(Token(SyntaxKind.VoidKeyword)),
                 _ => throw new NotSupportedException("Unsupported type code: " + typeCode),
             };

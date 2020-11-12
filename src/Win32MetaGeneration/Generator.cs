@@ -99,8 +99,9 @@ namespace Win32MetaGeneration
 
         private readonly Dictionary<TypeDefinitionHandle, TypeDefinitionHandle> nestedToDeclaringLookup = new Dictionary<TypeDefinitionHandle, TypeDefinitionHandle>();
 
-        internal Generator(string pathToMetaLibrary, string languageName)
+        internal Generator(string pathToMetaLibrary, LanguageVersion languageVersion = LanguageVersion.CSharp9)
         {
+            this.LanguageVersion = languageVersion;
             var project = CSharpCompilation.Create("PInvoke")
                 .AddReferences(
                     MetadataReference.CreateFromFile(pathToMetaLibrary, MetadataReferenceProperties.Assembly),
@@ -111,7 +112,7 @@ namespace Win32MetaGeneration
             this.mr = this.peReader.GetMetadataReader();
 
             var workspace = new AdhocWorkspace();
-            this.signatureTypeProvider = new SignatureTypeProvider(project, this);
+            this.signatureTypeProvider = new SignatureTypeProvider(this);
             this.customAttributeTypeProvider = new CustomAttributeTypeProvider();
 
             this.Apis = this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, "Microsoft.Windows.Sdk"));
@@ -135,6 +136,8 @@ namespace Win32MetaGeneration
         internal TypeDefinition Apis { get; }
 
         internal MetadataReader Reader => this.mr;
+
+        internal LanguageVersion LanguageVersion { get; }
 
         public void Dispose()
         {
@@ -360,7 +363,6 @@ namespace Win32MetaGeneration
 
         private MemberDeclarationSyntax? CreateInteropType(TypeDefinitionHandle typeDefHandle)
         {
-            Debug.Assert(!typeDefHandle.IsNil);
             TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefHandle);
             var baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
             MemberDeclarationSyntax typeDeclaration;
@@ -695,28 +697,31 @@ namespace Win32MetaGeneration
                 if (this.IsAttribute(att, "Microsoft.Windows.Sdk", "NativeTypeInfoAttribute"))
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
-                    UnmanagedType unmanagedType = (UnmanagedType)args.FixedArguments[0].Value;
-                    switch (unmanagedType)
+                    if (args.FixedArguments[0].Value is object value)
                     {
-                        case UnmanagedType.Bool: return PredefinedType(Token(SyntaxKind.BoolKeyword));
-                        case UnmanagedType.LPWStr:
-                            if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
-                            {
-                                return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
-                            }
+                        UnmanagedType unmanagedType = (UnmanagedType)value;
+                        switch (unmanagedType)
+                        {
+                            case UnmanagedType.Bool: return PredefinedType(Token(SyntaxKind.BoolKeyword));
+                            case UnmanagedType.LPWStr:
+                                if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
+                                {
+                                    return PointerType(PredefinedType(Token(SyntaxKind.CharKeyword)));
+                                }
 
-                            break;
+                                break;
 
-                        case UnmanagedType.LPStr:
-                            if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.SByteKeyword } } })
-                            {
-                                return PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword)));
-                            }
+                            case UnmanagedType.LPStr:
+                                if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.SByteKeyword } } })
+                                {
+                                    return PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword)));
+                                }
 
-                            break;
+                                break;
 
-                        default:
-                            break;
+                            default:
+                                break;
+                        }
                     }
 
                     break;

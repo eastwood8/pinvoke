@@ -4,14 +4,13 @@
 namespace Win32MetaGeneration
 {
     using System;
-    using System.Collections.Generic;
     using System.Diagnostics;
     using System.IO;
     using System.Reflection;
     using System.Reflection.Metadata;
     using System.Text;
     using System.Threading;
-    using Microsoft.CodeAnalysis;
+    using Microsoft.CodeAnalysis.CSharp;
 
     internal class Program
     {
@@ -35,7 +34,7 @@ namespace Win32MetaGeneration
 
                 var sw = Stopwatch.StartNew();
 
-                var generator = new Generator(pathToMetaLibrary, LanguageNames.CSharp);
+                var generator = new Generator(pathToMetaLibrary, LanguageVersion.CSharp9);
                 if (args.Length > 0)
                 {
                     foreach (MethodDefinitionHandle methodHandle in generator.Apis.GetMethods())
