@@ -559,7 +559,7 @@ namespace Win32MetaGeneration
                 }
             }
 
-            var enumValues = new List<EnumMemberDeclarationSyntax>();
+            var enumValues = new List<SyntaxNodeOrToken>();
             TypeSyntax? enumBaseType = null;
             foreach (FieldDefinitionHandle fieldDefHandle in typeDef.GetFields())
             {
@@ -573,7 +573,11 @@ namespace Win32MetaGeneration
                 }
 
                 Constant value = this.mr.GetConstant(valueHandle);
-                enumValues.Add(EnumMemberDeclaration(SafeIdentifier(enumValueName)).WithEqualsValue(EqualsValueClause(flagsEnum ? this.ToHexExpressionSyntax(value) : this.ToExpressionSyntax(value))));
+                ExpressionSyntax enumValue = flagsEnum ? this.ToHexExpressionSyntax(value) : this.ToExpressionSyntax(value);
+                EnumMemberDeclarationSyntax enumMember = EnumMemberDeclaration(SafeIdentifier(enumValueName))
+                    .WithEqualsValue(EqualsValueClause(enumValue));
+                enumValues.Add(enumMember);
+                enumValues.Add(Token(SyntaxKind.CommaToken));
             }
 
             if (enumBaseType is null)
@@ -583,7 +587,7 @@ namespace Win32MetaGeneration
 
             var name = this.mr.GetString(typeDef.Name);
             EnumDeclarationSyntax result = EnumDeclaration(name)
-                .AddMembers(enumValues.ToArray())
+                .WithMembers(SeparatedList<EnumMemberDeclarationSyntax>(enumValues.ToArray()))
                 .WithModifiers(PublicModifiers);
 
             if (!(enumBaseType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.IntKeyword } }))
