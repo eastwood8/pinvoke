@@ -892,10 +892,13 @@ namespace Win32MetaGeneration
         private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration)
         {
             static ParameterSyntax StripAttributes(ParameterSyntax parameter) => parameter.WithAttributeLists(List<AttributeListSyntax>());
+            static TypeSyntax MakeSpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("Span")).AddTypeArgumentListArguments(typeArgument));
+            static TypeSyntax MakeReadOnlySpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("ReadOnlySpan")).AddTypeArgumentListArguments(typeArgument));
 
             var parameters = externMethodDeclaration.ParameterList.Parameters.Select(StripAttributes).ToList();
             var arguments = externMethodDeclaration.ParameterList.Parameters.Select(p => Argument(IdentifierName(p.Identifier.Text))).ToList();
             var signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
+            var fixedBlocks = new List<VariableDeclarationSyntax>();
             var leadingStatements = new List<StatementSyntax>();
             bool signatureChanged = false;
             foreach (ParameterHandle paramHandle in methodDefinition.GetParameters())
@@ -911,18 +914,52 @@ namespace Win32MetaGeneration
                     bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
                     bool isIn = (param.Attributes & ParameterAttributes.In) == ParameterAttributes.In;
                     bool isOut = (param.Attributes & ParameterAttributes.Out) == ParameterAttributes.Out;
+                    bool isConst = false;
+                    bool isArray = false;
+                    UnmanagedType? unmanagedType = null;
                     foreach (CustomAttributeHandle attHandle in param.GetCustomAttributes())
                     {
                         CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                        if (this.IsAttribute(att, MicrosoftWindowsSdk, "ConstAttribute"))
+                        {
+                            isConst = true;
+                            continue;
+                        }
+
+                        if (this.IsAttribute(att, MicrosoftWindowsSdk, NativeTypeInfoAttribute))
+                        {
+                            var args = att.DecodeValue(this.customAttributeTypeProvider);
+                            if (args.FixedArguments[0].Value is object value)
+                            {
+                                unmanagedType = (UnmanagedType)value;
+                                switch (unmanagedType.Value)
+                                {
+                                    case UnmanagedType.LPWStr:
+                                        isArray = true;
+                                        break;
+                                }
+                            }
+
+                            continue;
+                        }
                     }
 
-                    if (isIn && isOptional && !isOut)
+                    IdentifierNameSyntax origName = IdentifierName(parameters[param.SequenceNumber - 1].Identifier.ValueText);
+                    IdentifierNameSyntax localName = IdentifierName(origName + "Local");
+                    if (isArray)
+                    {
+                        signatureChanged = true;
+                        parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
+                            .WithType(isIn && isConst ? MakeReadOnlySpanOfT(ptrType.ElementType) : MakeSpanOfT(ptrType.ElementType));
+                        fixedBlocks.Add(VariableDeclaration(ptrType).AddVariables(
+                            VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(origName))));
+                        arguments[param.SequenceNumber - 1] = Argument(localName);
+                    }
+                    else if (isIn && isOptional && !isOut)
                     {
                         signatureChanged = true;
                         parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
                             .WithType(NullableType(ptrType.ElementType));
-                        IdentifierNameSyntax origName = IdentifierName(parameters[param.SequenceNumber - 1].Identifier.ValueText);
-                        IdentifierNameSyntax localName = IdentifierName(origName + "Local");
                         leadingStatements.Add(
                             LocalDeclarationStatement(VariableDeclaration(ptrType.ElementType)
                                 .AddVariables(VariableDeclarator(localName.Identifier).WithInitializer(
@@ -945,17 +982,23 @@ namespace Win32MetaGeneration
                         XmlText("/// "),
                         XmlEmptyElement("inheritdoc").AddAttributes(XmlCrefAttribute(NameMemberCref(IdentifierName(externMethodDeclaration.Identifier), ToCref(externMethodDeclaration.ParameterList)))),
                         XmlText().AddTextTokens(XmlTextNewLine(TriviaList(), "\r\n", "\r\n", TriviaList()))));
+                var body = Block()
+                        .AddStatements(leadingStatements.ToArray())
+                        .AddStatements(
+                            ReturnStatement(InvocationExpression(IdentifierName(externMethodDeclaration.Identifier.Text)).AddArgumentListArguments(
+                            arguments.ToArray())));
+
+                foreach (var fixedExpression in fixedBlocks)
+                {
+                    body = Block(FixedStatement(fixedExpression, body));
+                }
 
                 MethodDeclarationSyntax friendlyDeclaration = externMethodDeclaration
                     .WithModifiers(TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.UnsafeKeyword)))
                     .WithAttributeLists(List<AttributeListSyntax>())
                     .WithParameterList(ParameterList().AddParameters(parameters.ToArray()))
                     .WithLeadingTrivia(leadingTrivia)
-                    .WithBody(Block()
-                        .AddStatements(leadingStatements.ToArray())
-                        .AddStatements(
-                            ReturnStatement(InvocationExpression(IdentifierName(externMethodDeclaration.Identifier.Text)).AddArgumentListArguments(
-                            arguments.ToArray()))))
+                    .WithBody(body)
                     .WithSemicolonToken(default);
                 yield return friendlyDeclaration;
             }
