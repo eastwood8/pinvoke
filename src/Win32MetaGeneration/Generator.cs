@@ -165,9 +165,8 @@ namespace Win32MetaGeneration
 
         private readonly Dictionary<string, TypeSyntax> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax>();
 
-        internal Generator(string pathToMetaLibrary, LanguageVersion languageVersion = LanguageVersion.CSharp9)
+        internal Generator(string pathToMetaLibrary)
         {
-            this.LanguageVersion = languageVersion;
             var project = CSharpCompilation.Create("PInvoke")
                 .AddReferences(
                     MetadataReference.CreateFromFile(pathToMetaLibrary, MetadataReferenceProperties.Assembly),
@@ -205,7 +204,9 @@ namespace Win32MetaGeneration
 
         internal MetadataReader Reader => this.mr;
 
-        internal LanguageVersion LanguageVersion { get; }
+        internal LanguageVersion LanguageVersion { get; set; } = LanguageVersion.CSharp9;
+
+        internal bool WideCharOnly { get; set; } = true;
 
         private IEnumerable<IGrouping<string, MemberDeclarationSyntax>> MembersByClass =>
             from entry in this.modulesAndMembers
@@ -256,7 +257,24 @@ namespace Win32MetaGeneration
             }
         }
 
-        internal void GenerateExternMethod(string name) => this.GenerateExternMethod(this.methodsByName[name]);
+        internal void GenerateExternMethod(string name)
+        {
+            if (this.methodsByName.TryGetValue(name, out MethodDefinitionHandle handle))
+            {
+                this.GenerateExternMethod(handle);
+                return;
+            }
+
+            if (this.methodsByName.TryGetValue(name + "W", out handle))
+            {
+                this.GenerateExternMethod(handle);
+            }
+
+            if (this.methodsByName.TryGetValue(name + "A", out handle))
+            {
+                this.GenerateExternMethod(handle);
+            }
+        }
 
         internal void GenerateExternMethod(MethodDefinitionHandle methodDefinitionHandle)
         {
@@ -281,7 +299,7 @@ namespace Win32MetaGeneration
             MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
 
             var methodName = this.mr.GetString(methodDefinition.Name);
-            if (this.IsAnsiFunction(methodDefinition, methodName))
+            if (this.WideCharOnly && this.IsAnsiFunction(methodDefinition, methodName))
             {
                 // Skip Ansi functions.
                 return;
@@ -296,7 +314,7 @@ namespace Win32MetaGeneration
             }
 
             string? entrypoint = null;
-            if (this.IsWideFunction(methodDefinition, methodName))
+            if (this.WideCharOnly && this.IsWideFunction(methodDefinition, methodName))
             {
                 entrypoint = methodName;
                 methodName = methodName.Substring(0, methodName.Length - 1);

@@ -34,7 +34,10 @@ namespace Win32MetaGeneration
 
                 var sw = Stopwatch.StartNew();
 
-                var generator = new Generator(pathToMetaLibrary, LanguageVersion.CSharp9);
+                var generator = new Generator(pathToMetaLibrary)
+                {
+                    WideCharOnly = true,
+                };
                 if (args.Length > 0)
                 {
                     foreach (string name in args)
