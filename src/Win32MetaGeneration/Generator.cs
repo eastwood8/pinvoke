@@ -358,12 +358,13 @@ namespace Win32MetaGeneration
                     AttributeList().WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.ReturnKeyword))).AddAttributes(returnTypeAttribute));
             }
 
+            List<MemberDeclarationSyntax> methodsList = this.GetModuleMemberList(moduleName);
             if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
             {
                 methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
+                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration));
             }
 
-            List<MemberDeclarationSyntax> methodsList = this.GetModuleMemberList(moduleName);
             methodsList.Add(methodDeclaration);
 
             // If RIAAFree applies, make sure we generate the close handle method.
@@ -500,6 +501,15 @@ namespace Win32MetaGeneration
 
         private static string GetHiddenFieldName(string fieldName) => $"__{fieldName}";
 
+        private static CrefParameterListSyntax ToCref(ParameterListSyntax parameterList) => CrefParameterList().AddParameters(parameterList.Parameters.Select(ToCref).ToArray());
+
+        private static CrefParameterSyntax ToCref(ParameterSyntax parameter)
+            => CrefParameter(
+                parameter.Modifiers.Any(SyntaxKind.RefKeyword) ? Token(SyntaxKind.RefKeyword) :
+                parameter.Modifiers.Any(SyntaxKind.OutKeyword) ? Token(SyntaxKind.OutKeyword) :
+                default,
+                parameter.Type!);
+
         private bool IsCompilerGenerated(TypeDefinition typeDef)
         {
             bool isCompilerGenerated = false;
@@ -565,7 +575,7 @@ namespace Win32MetaGeneration
                         Argument(IdentifierName(preexistingHandleName)))))));
 
             // public override bool IsInvalid => this.handle == default || this.Handle == INVALID_HANDLE_VALUE;
-            members.Add(MethodDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), nameof(SafeHandle.IsInvalid))
+            members.Add(PropertyDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), nameof(SafeHandle.IsInvalid))
                 .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.OverrideKeyword))
                 .WithExpressionBody(ArrowExpressionClause(
                     BinaryExpression(
@@ -877,6 +887,78 @@ namespace Win32MetaGeneration
             }
 
             return result;
+        }
+
+        private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration)
+        {
+            static ParameterSyntax StripAttributes(ParameterSyntax parameter) => parameter.WithAttributeLists(List<AttributeListSyntax>());
+
+            var parameters = externMethodDeclaration.ParameterList.Parameters.Select(StripAttributes).ToList();
+            var arguments = externMethodDeclaration.ParameterList.Parameters.Select(p => Argument(IdentifierName(p.Identifier.Text))).ToList();
+            var signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
+            var leadingStatements = new List<StatementSyntax>();
+            bool signatureChanged = false;
+            foreach (ParameterHandle paramHandle in methodDefinition.GetParameters())
+            {
+                var param = this.mr.GetParameter(paramHandle);
+                if (param.SequenceNumber == 0)
+                {
+                    continue;
+                }
+
+                if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType)
+                {
+                    bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
+                    bool isIn = (param.Attributes & ParameterAttributes.In) == ParameterAttributes.In;
+                    bool isOut = (param.Attributes & ParameterAttributes.Out) == ParameterAttributes.Out;
+                    foreach (CustomAttributeHandle attHandle in param.GetCustomAttributes())
+                    {
+                        CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
+                    }
+
+                    if (isIn && isOptional && !isOut)
+                    {
+                        signatureChanged = true;
+                        parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
+                            .WithType(NullableType(ptrType.ElementType));
+                        IdentifierNameSyntax origName = IdentifierName(parameters[param.SequenceNumber - 1].Identifier.ValueText);
+                        IdentifierNameSyntax localName = IdentifierName(origName + "Local");
+                        leadingStatements.Add(
+                            LocalDeclarationStatement(VariableDeclaration(ptrType.ElementType)
+                                .AddVariables(VariableDeclarator(localName.Identifier).WithInitializer(
+                                    EqualsValueClause(ConditionalExpression(
+                                        MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, origName, IdentifierName("HasValue")),
+                                        MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, origName, IdentifierName("Value")),
+                                        DefaultExpression(ptrType.ElementType)))))));
+                        arguments[param.SequenceNumber - 1] = Argument(ConditionalExpression(
+                            MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, origName, IdentifierName("HasValue")),
+                            PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName),
+                            LiteralExpression(SyntaxKind.NullLiteralExpression)));
+                    }
+                }
+            }
+
+            if (signatureChanged)
+            {
+                var leadingTrivia = Trivia(
+                    DocumentationCommentTrivia(SyntaxKind.SingleLineDocumentationCommentTrivia).AddContent(
+                        XmlText("/// "),
+                        XmlEmptyElement("inheritdoc").AddAttributes(XmlCrefAttribute(NameMemberCref(IdentifierName(externMethodDeclaration.Identifier), ToCref(externMethodDeclaration.ParameterList)))),
+                        XmlText().AddTextTokens(XmlTextNewLine(TriviaList(), "\r\n", "\r\n", TriviaList()))));
+
+                MethodDeclarationSyntax friendlyDeclaration = externMethodDeclaration
+                    .WithModifiers(TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.UnsafeKeyword)))
+                    .WithAttributeLists(List<AttributeListSyntax>())
+                    .WithParameterList(ParameterList().AddParameters(parameters.ToArray()))
+                    .WithLeadingTrivia(leadingTrivia)
+                    .WithBody(Block()
+                        .AddStatements(leadingStatements.ToArray())
+                        .AddStatements(
+                            ReturnStatement(InvocationExpression(IdentifierName(externMethodDeclaration.Identifier.Text)).AddArgumentListArguments(
+                            arguments.ToArray()))))
+                    .WithSemicolonToken(default);
+                yield return friendlyDeclaration;
+            }
         }
 
         private bool IsAttribute(CustomAttribute attribute, string ns, string name)
