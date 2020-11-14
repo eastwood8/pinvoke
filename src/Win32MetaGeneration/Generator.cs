@@ -939,6 +939,13 @@ namespace Win32MetaGeneration
                     bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
                     bool isIn = (param.Attributes & ParameterAttributes.In) == ParameterAttributes.In;
                     bool isOut = (param.Attributes & ParameterAttributes.Out) == ParameterAttributes.Out;
+
+                    // If there are no SAL annotations at all, assume it is bidirectional.
+                    if (!isOptional && !isIn && !isOut)
+                    {
+                        isIn = isOut = true;
+                    }
+
                     bool isConst = false;
                     bool isArray = false;
                     UnmanagedType? unmanagedType = null;
