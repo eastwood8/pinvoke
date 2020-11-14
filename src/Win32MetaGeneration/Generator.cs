@@ -441,7 +441,7 @@ namespace Win32MetaGeneration
         private static AttributeSyntax StructLayout(TypeDefinition typeDef, TypeLayout layout)
         {
             LayoutKind layoutKind = (typeDef.Attributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout ? LayoutKind.Explicit : LayoutKind.Sequential;
-            var structLayoutAttribute = Attribute(IdentifierName(nameof(StructLayoutAttribute))).AddArgumentListArguments(
+            var structLayoutAttribute = Attribute(IdentifierName("StructLayout")).AddArgumentListArguments(
                 AttributeArgument(MemberAccessExpression(
                     SyntaxKind.SimpleMemberAccessExpression,
                     IdentifierName(nameof(LayoutKind)),
@@ -832,7 +832,7 @@ namespace Win32MetaGeneration
                 .WithModifiers(PublicModifiers);
 
             TypeLayout layout = typeDef.GetLayout();
-            if (!layout.IsDefault)
+            if (!layout.IsDefault || (typeDef.Attributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout)
             {
                 result = result.AddAttributeLists(AttributeList().AddAttributes(StructLayout(typeDef, layout)));
             }
