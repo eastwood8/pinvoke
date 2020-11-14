@@ -359,22 +359,15 @@ namespace Win32MetaGeneration
             string? entrypoint = null;
             if (this.WideCharOnly && this.IsWideFunction(methodDefinition, methodName))
             {
-                entrypoint = methodName;
-                methodName = methodName.Substring(0, methodName.Length - 1);
-            }
-
-            CustomAttributeHandleCollection? returnTypeAttributes = null;
-            foreach (ParameterHandle parameterHandle in methodDefinition.GetParameters())
-            {
-                var parameter = this.mr.GetParameter(parameterHandle);
-                if (parameter.Name.IsNil)
+                string newName = methodName.Substring(0, methodName.Length - 1);
+                if (!this.methodsByName.ContainsKey(newName))
                 {
-                    returnTypeAttributes = parameter.GetCustomAttributes();
+                    entrypoint = methodName;
+                    methodName = newName;
                 }
-
-                // What we're looking for would always be the first element in the collection.
-                break;
             }
+
+            CustomAttributeHandleCollection? returnTypeAttributes = this.GetReturnTypeCustomAttributes(methodDefinition);
 
             TypeSyntax returnType = signature.ReturnType;
             AttributeSyntax? returnTypeAttribute = null;
@@ -553,6 +546,24 @@ namespace Win32MetaGeneration
                 default,
                 parameter.Type!);
 
+        private CustomAttributeHandleCollection? GetReturnTypeCustomAttributes(MethodDefinition methodDefinition)
+        {
+            CustomAttributeHandleCollection? returnTypeAttributes = null;
+            foreach (ParameterHandle parameterHandle in methodDefinition.GetParameters())
+            {
+                var parameter = this.mr.GetParameter(parameterHandle);
+                if (parameter.Name.IsNil)
+                {
+                    returnTypeAttributes = parameter.GetCustomAttributes();
+                }
+
+                // What we're looking for would always be the first element in the collection.
+                break;
+            }
+
+            return returnTypeAttributes;
+        }
+
         private bool IsCompilerGenerated(TypeDefinition typeDef)
         {
             bool isCompilerGenerated = false;
@@ -576,8 +587,13 @@ namespace Win32MetaGeneration
                 return safeHandleType;
             }
 
-            var releaseMethodHandle = this.methodsByName[releaseMethod];
-            string releaseMethodModule = this.GetNormalizedModuleName(this.mr.GetMethodDefinition(releaseMethodHandle).GetImport());
+            MethodDefinitionHandle releaseMethodHandle = this.methodsByName[releaseMethod];
+            MethodDefinition releaseMethodDef = this.mr.GetMethodDefinition(releaseMethodHandle);
+            string releaseMethodModule = this.GetNormalizedModuleName(releaseMethodDef.GetImport());
+            var releaseMethodSignature = releaseMethodDef.DecodeSignature(this.signatureTypeProvider, null);
+            TypeSyntax releaseMethodReturnType = this.GetReturnTypeCustomAttributes(releaseMethodDef) is { } atts
+                ? this.ReinterpretMethodSignatureType(releaseMethodSignature.ReturnType, atts).Type
+                : releaseMethodSignature.ReturnType;
             string safeHandleClassName = $"{releaseMethod}SafeHandle";
 
             var members = new List<MemberDeclarationSyntax>();
@@ -628,12 +644,52 @@ namespace Win32MetaGeneration
                 .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)));
 
             // protected override bool ReleaseHandle() => ReleaseMethod(this.handle);
-            members.Add(MethodDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), "ReleaseHandle")
-                .AddModifiers(Token(SyntaxKind.ProtectedKeyword), Token(SyntaxKind.OverrideKeyword))
-                .WithExpressionBody(ArrowExpressionClause(InvocationExpression(
-                        MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, IdentifierName(releaseMethodModule), IdentifierName(releaseMethod)),
-                        ArgumentList().AddArguments(Argument(thisHandle)))))
-                .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)));
+            // Special case release functions based on their return type as follows: (https://github.com/microsoft/win32metadata/issues/25)
+            //  * bool => true is success
+            //  * int => zero is success
+            //  * uint => zero is success
+            //  * byte => non-zero is success
+            ExpressionSyntax releaseInvocation = InvocationExpression(
+                MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, IdentifierName(releaseMethodModule), IdentifierName(releaseMethod)),
+                ArgumentList().AddArguments(Argument(thisHandle)));
+            BlockSyntax? releaseBlock = null;
+            if (!(releaseMethodReturnType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.BoolKeyword } }))
+            {
+                SyntaxKind returnType = ((PredefinedTypeSyntax)releaseMethodReturnType).Keyword.Kind();
+                if (returnType == SyntaxKind.IntKeyword)
+                {
+                    releaseInvocation = BinaryExpression(SyntaxKind.EqualsExpression, releaseInvocation, LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0)));
+                }
+                else
+                if (returnType == SyntaxKind.UIntKeyword)
+                {
+                    releaseInvocation = BinaryExpression(SyntaxKind.EqualsExpression, releaseInvocation, LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0)));
+                }
+                else if (returnType == SyntaxKind.ByteKeyword)
+                {
+                    releaseInvocation = BinaryExpression(SyntaxKind.NotEqualsExpression, releaseInvocation, LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0)));
+                }
+                else if (returnType == SyntaxKind.VoidKeyword)
+                {
+                    releaseBlock = Block(
+                        ExpressionStatement(releaseInvocation),
+                        ReturnStatement(LiteralExpression(SyntaxKind.TrueLiteralExpression)));
+                }
+                else
+                {
+                    throw new NotSupportedException($"Return type {returnType} on release method {releaseMethod} not supported.");
+                }
+            }
+
+            MethodDeclarationSyntax releaseHandleDeclaration = MethodDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), "ReleaseHandle")
+                .AddModifiers(Token(SyntaxKind.ProtectedKeyword), Token(SyntaxKind.OverrideKeyword));
+            releaseHandleDeclaration = releaseBlock is null
+                ? releaseHandleDeclaration
+                     .WithExpressionBody(ArrowExpressionClause(releaseInvocation))
+                     .WithSemicolonToken(Token(SyntaxKind.SemicolonToken))
+                : releaseHandleDeclaration
+                    .WithBody(releaseBlock);
+            members.Add(releaseHandleDeclaration);
 
             ClassDeclarationSyntax safeHandleDeclaration = ClassDeclaration(safeHandleClassName)
                 .AddModifiers(Token(SyntaxKind.PublicKeyword))
