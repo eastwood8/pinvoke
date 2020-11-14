@@ -182,7 +182,7 @@ namespace Win32MetaGeneration
 
         private readonly Dictionary<string, MethodDefinitionHandle> methodsByName;
 
-        private readonly Dictionary<string, TypeSyntax> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax>();
+        private readonly Dictionary<string, TypeSyntax?> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax?>();
 
         internal Generator(string pathToMetaLibrary)
         {
@@ -591,7 +591,7 @@ namespace Win32MetaGeneration
             return isCompilerGenerated;
         }
 
-        private TypeSyntax GenerateSafeHandle(string releaseMethod)
+        private TypeSyntax? GenerateSafeHandle(string releaseMethod)
         {
             if (this.releaseMethodsWithSafeHandleTypesGenerating.TryGetValue(releaseMethod, out TypeSyntax? safeHandleType))
             {
@@ -605,6 +605,13 @@ namespace Win32MetaGeneration
             TypeSyntax releaseMethodReturnType = this.GetReturnTypeCustomAttributes(releaseMethodDef) is { } atts
                 ? this.ReinterpretMethodSignatureType(releaseMethodSignature.ReturnType, atts).Type
                 : releaseMethodSignature.ReturnType;
+
+            // If the release method takes more than one parameter, we can't generate a SafeHandle for it.
+            if (releaseMethodSignature.RequiredParameterCount != 1)
+            {
+                return null;
+            }
+
             string safeHandleClassName = $"{releaseMethod}SafeHandle";
             this.TryGetRenamedMethod(releaseMethod, out string? renamedReleaseMethod);
 
@@ -1351,9 +1358,9 @@ namespace Win32MetaGeneration
                 if (this.IsAttribute(att, MicrosoftWindowsSdk, RIAAFreeAttribute))
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
-                    if (args.FixedArguments[0].Value is string releaseMethod)
+                    if (args.FixedArguments[0].Value is string releaseMethod && this.GenerateSafeHandle(releaseMethod) is TypeSyntax safeHandleType)
                     {
-                        return (this.GenerateSafeHandle(releaseMethod), null);
+                        return (safeHandleType, null);
                     }
                 }
             }
