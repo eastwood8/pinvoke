@@ -126,7 +126,25 @@ namespace Win32MetaGeneration
 
         private static readonly HashSet<string> CSharpKeywords = new HashSet<string>(StringComparer.Ordinal)
         {
+            "object",
             "event",
+            "override",
+            "public",
+            "private",
+            "protected",
+            "internal",
+            "virtual",
+            "string",
+            "base",
+            "ref",
+            "in",
+            "out",
+            "decimal",
+        };
+
+        private static readonly HashSet<string> ObjectMembers = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "GetType",
         };
 
         private static readonly AttributeSyntax InAttributeSyntax = Attribute(IdentifierName("In"));
@@ -816,6 +834,11 @@ namespace Win32MetaGeneration
                     {
                         field = field.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
                     }
+
+                    if (ObjectMembers.Contains(fieldName))
+                    {
+                        field = field.AddModifiers(Token(SyntaxKind.NewKeyword));
+                    }
                 }
 
                 int offset = fieldDef.GetOffset();
@@ -937,8 +960,11 @@ namespace Win32MetaGeneration
                 // TODO:
                 // * Review double/triple pointer scenarios.
                 // * Review pointers to COM pointer scenarios.
-                if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType)
+                // * Add nullable annotations on COM interfaces that are annotated as optional.
+                if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType
+                    && !(ptrType.ElementType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.VoidKeyword } }))
                 {
+                    bool isPointerToPointer = ptrType.ElementType is PointerTypeSyntax;
                     bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
                     bool isIn = (param.Attributes & ParameterAttributes.In) == ParameterAttributes.In;
                     bool isOut = (param.Attributes & ParameterAttributes.Out) == ParameterAttributes.Out;
@@ -1033,7 +1059,7 @@ namespace Win32MetaGeneration
                                             Argument(InvocationExpression(IdentifierName("nameof")).AddArgumentListArguments(Argument(origName)))))));
                         }
                     }
-                    else if (isIn && isOptional && !isOut)
+                    else if (isIn && isOptional && !isOut && !isPointerToPointer)
                     {
                         signatureChanged = true;
                         parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
@@ -1047,7 +1073,7 @@ namespace Win32MetaGeneration
                                         DefaultExpression(ptrType.ElementType)))))));
                         arguments[param.SequenceNumber - 1] = Argument(ConditionalExpression(
                             MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, origName, IdentifierName("HasValue")),
-                            PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName),
+                            PrefixUnaryExpression(SyntaxKind.AddressOfExpression, localName),
                             LiteralExpression(SyntaxKind.NullLiteralExpression)));
                     }
                     else if (isIn && isOut && !isOptional)
@@ -1094,11 +1120,12 @@ namespace Win32MetaGeneration
                         XmlText("/// "),
                         XmlEmptyElement("inheritdoc").AddAttributes(XmlCrefAttribute(NameMemberCref(IdentifierName(externMethodDeclaration.Identifier), ToCref(externMethodDeclaration.ParameterList)))),
                         XmlText().AddTextTokens(XmlTextNewLine(TriviaList(), "\r\n", "\r\n", TriviaList()))));
+                InvocationExpressionSyntax externInvocation = InvocationExpression(IdentifierName(externMethodDeclaration.Identifier.Text))
+                    .AddArgumentListArguments(arguments.ToArray());
+                bool hasVoidReturn = externMethodDeclaration.ReturnType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.VoidKeyword } };
                 var body = Block()
                         .AddStatements(leadingStatements.ToArray())
-                        .AddStatements(
-                            ReturnStatement(InvocationExpression(IdentifierName(externMethodDeclaration.Identifier.Text)).AddArgumentListArguments(
-                            arguments.ToArray())));
+                        .AddStatements(hasVoidReturn ? (StatementSyntax)ExpressionStatement(externInvocation) : ReturnStatement(externInvocation));
 
                 foreach (var fixedExpression in fixedBlocks)
                 {
