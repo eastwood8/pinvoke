@@ -938,6 +938,8 @@ namespace Win32MetaGeneration
                     bool isConst = false;
                     bool isArray = false;
                     UnmanagedType? unmanagedType = null;
+                    bool isNullTerminated = false;
+                    short? sizeParamIndex = null;
                     foreach (CustomAttributeHandle attHandle in param.GetCustomAttributes())
                     {
                         CustomAttribute att = this.mr.GetCustomAttribute(attHandle);
@@ -961,6 +963,9 @@ namespace Win32MetaGeneration
                                 }
                             }
 
+                            isNullTerminated |= args.NamedArguments.Any(a => a.Name == "IsNullTerminated" && a.Value is bool value && value);
+                            sizeParamIndex = (short?)args.NamedArguments.FirstOrDefault(a => a.Name == "SizeParamIndex").Value;
+
                             continue;
                         }
                     }
@@ -975,6 +980,44 @@ namespace Win32MetaGeneration
                         fixedBlocks.Add(VariableDeclaration(ptrType).AddVariables(
                             VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(origName))));
                         arguments[param.SequenceNumber - 1] = Argument(localName);
+
+                        if (isNullTerminated && !sizeParamIndex.HasValue)
+                        {
+                            // In an abundance of caution, since in .NET a Span type carries length information which
+                            // does not propagate to the native side, make sure that the span's last element is \0 (or perhaps
+                            // the element after that).
+                            // In reading beyond the last element, maybe we'll trigger an AV, but better us than the operating system
+                            // to notify the caller when they forgot to add a null terminator.
+                            //// if ((param.Length == 0 || param[param.Length - 1] != default) && *(paramLocal + param.Length) != default)
+                            ////    throw new ArgumentException("Null termination required.", nameof(param));
+                            ExpressionSyntax paramLength = MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, origName, IdentifierName(nameof(Span<int>.Length)));
+                            leadingStatements.Add(
+                                IfStatement(
+                                    BinaryExpression(
+                                        SyntaxKind.LogicalAndExpression,
+                                        ParenthesizedExpression(
+                                            BinaryExpression(
+                                                SyntaxKind.LogicalOrExpression,
+                                                BinaryExpression(SyntaxKind.EqualsExpression, paramLength, LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0))),
+                                                BinaryExpression(
+                                                    SyntaxKind.NotEqualsExpression,
+                                                    ElementAccessExpression(origName).AddArgumentListArguments(
+                                                        Argument(BinaryExpression(SyntaxKind.SubtractExpression, paramLength, LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(1))))),
+                                                    LiteralExpression(SyntaxKind.DefaultLiteralExpression)))),
+                                        BinaryExpression(
+                                            SyntaxKind.NotEqualsExpression,
+                                            PrefixUnaryExpression(
+                                                SyntaxKind.PointerIndirectionExpression,
+                                                ParenthesizedExpression(BinaryExpression(
+                                                    SyntaxKind.AddExpression,
+                                                    localName,
+                                                    paramLength))),
+                                            LiteralExpression(SyntaxKind.DefaultLiteralExpression))),
+                                    ThrowStatement(ObjectCreationExpression(IdentifierName(nameof(ArgumentException)))
+                                        .AddArgumentListArguments(
+                                            Argument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal("Null termination required."))),
+                                            Argument(InvocationExpression(IdentifierName("nameof")).AddArgumentListArguments(Argument(origName)))))));
+                        }
                     }
                     else if (isIn && isOptional && !isOut)
                     {
