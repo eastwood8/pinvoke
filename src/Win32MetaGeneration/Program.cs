@@ -42,7 +42,15 @@ namespace Win32MetaGeneration
                 {
                     foreach (string name in args)
                     {
-                        generator.GenerateExternMethod(name);
+                        cts.Token.ThrowIfCancellationRequested();
+                        if (name.EndsWith(".*"))
+                        {
+                            generator.GenerateAllExternMethods(name.Substring(0, name.Length - 2), cts.Token);
+                        }
+                        else
+                        {
+                            generator.GenerateExternMethod(name);
+                        }
                     }
                 }
                 else

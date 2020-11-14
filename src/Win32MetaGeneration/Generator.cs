@@ -243,6 +243,27 @@ namespace Win32MetaGeneration
             }
         }
 
+        internal void GenerateAllExternMethods(string moduleName, CancellationToken cancellationToken)
+        {
+            foreach (MethodDefinitionHandle methodHandle in this.Apis.GetMethods())
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                MethodDefinition methodDef = this.mr.GetMethodDefinition(methodHandle);
+                ModuleReferenceHandle moduleHandle = methodDef.GetImport().Module;
+                if (moduleHandle.IsNil)
+                {
+                    continue;
+                }
+
+                ModuleReference module = this.mr.GetModuleReference(moduleHandle);
+                if (this.mr.StringComparer.Equals(module.Name, moduleName, ignoreCase: true))
+                {
+                    this.GenerateExternMethod(methodHandle);
+                }
+            }
+        }
+
         internal void GenerateAllInteropTypes(CancellationToken cancellationToken)
         {
             foreach (TypeDefinitionHandle typeDefinitionHandle in this.mr.TypeDefinitions)
