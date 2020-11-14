@@ -628,7 +628,7 @@ namespace Win32MetaGeneration
 
             this.GetModuleMemberList(releaseMethodModule).Add(safeHandleDeclaration);
 
-            safeHandleType = IdentifierName(safeHandleDeclaration.Identifier);
+            safeHandleType = QualifiedName(IdentifierName(releaseMethodModule), IdentifierName(safeHandleDeclaration.Identifier));
             this.releaseMethodsWithSafeHandleTypesGenerating.Add(releaseMethod, safeHandleType);
             return safeHandleType;
         }
@@ -934,6 +934,9 @@ namespace Win32MetaGeneration
                     continue;
                 }
 
+                // TODO:
+                // * Review double/triple pointer scenarios.
+                // * Review pointers to COM pointer scenarios.
                 if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType)
                 {
                     bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
