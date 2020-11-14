@@ -188,15 +188,17 @@ namespace Win32MetaGeneration
         internal CompilationUnitSyntax CompilationUnit
         {
             get => CompilationUnit()
-                .AddMembers(this.MembersByClass.Select(kv =>
-                    ClassDeclaration(Identifier(GetClassNameForModule(kv.Key)))
-                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
-                        .AddMembers(kv.ToArray())).ToArray())
-                        .AddMembers(this.types.Values.ToArray())
-                .AddUsings(
-                    UsingDirective(IdentifierName(nameof(System))),
-                    UsingDirective(IdentifierName(nameof(System) + "." + nameof(System.Diagnostics))),
-                    UsingDirective(ParseName(SystemRuntimeInteropServices)))
+                .AddMembers(
+                    NamespaceDeclaration(ParseName(this.Namespace))
+                        .AddMembers(this.MembersByClass.Select(kv =>
+                            ClassDeclaration(Identifier(GetClassNameForModule(kv.Key)))
+                                .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
+                                .AddMembers(kv.ToArray())).ToArray())
+                                .AddMembers(this.types.Values.ToArray())
+                        .AddUsings(
+                            UsingDirective(IdentifierName(nameof(System))),
+                            UsingDirective(IdentifierName(nameof(System) + "." + nameof(System.Diagnostics))),
+                            UsingDirective(ParseName(SystemRuntimeInteropServices))))
                 .NormalizeWhitespace();
         }
 
@@ -207,6 +209,8 @@ namespace Win32MetaGeneration
         internal LanguageVersion LanguageVersion { get; set; } = LanguageVersion.CSharp9;
 
         internal bool WideCharOnly { get; set; } = true;
+
+        internal string Namespace { get; set; } = "PInvoke";
 
         private IEnumerable<IGrouping<string, MemberDeclarationSyntax>> MembersByClass =>
             from entry in this.modulesAndMembers
