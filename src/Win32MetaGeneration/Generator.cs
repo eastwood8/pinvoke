@@ -993,6 +993,16 @@ namespace Win32MetaGeneration
                             PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName),
                             LiteralExpression(SyntaxKind.NullLiteralExpression)));
                     }
+                    else if (isIn && isOut && !isOptional)
+                    {
+                        signatureChanged = true;
+                        parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
+                            .WithType(ptrType.ElementType)
+                            .WithModifiers(TokenList(Token(SyntaxKind.RefKeyword)));
+                        fixedBlocks.Add(VariableDeclaration(ptrType).AddVariables(
+                            VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(origName))));
+                        arguments[param.SequenceNumber - 1] = Argument(localName);
+                    }
                 }
             }
 
