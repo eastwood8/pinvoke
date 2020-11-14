@@ -231,7 +231,7 @@ namespace Win32MetaGeneration
 
         internal bool WideCharOnly { get; set; } = true;
 
-        internal string Namespace { get; set; } = "PInvoke";
+        internal string Namespace { get; set; } = "PInvoke.Windows";
 
         private IEnumerable<IGrouping<string, MemberDeclarationSyntax>> MembersByClass =>
             from entry in this.modulesAndMembers
