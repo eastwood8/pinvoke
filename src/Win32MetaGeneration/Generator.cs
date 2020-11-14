@@ -1020,7 +1020,6 @@ namespace Win32MetaGeneration
 
             var parameters = externMethodDeclaration.ParameterList.Parameters.Select(StripAttributes).ToList();
             var arguments = externMethodDeclaration.ParameterList.Parameters.Select(p => Argument(IdentifierName(p.Identifier.Text))).ToList();
-            var signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
             var fixedBlocks = new List<VariableDeclarationSyntax>();
             var leadingStatements = new List<StatementSyntax>();
             bool signatureChanged = false;
