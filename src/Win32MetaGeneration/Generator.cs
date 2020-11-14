@@ -233,7 +233,7 @@ namespace Win32MetaGeneration
         private IEnumerable<IGrouping<string, MemberDeclarationSyntax>> MembersByClass =>
             from entry in this.modulesAndMembers
             from method in entry.Value
-            group method by entry.Key.StartsWith("api-") || entry.Key.StartsWith("ext-") ? "ApiSets" : entry.Key into x
+            group method by GetClassNameForModule(entry.Key) into x
             select x;
 
         public void Dispose()
@@ -389,8 +389,7 @@ namespace Win32MetaGeneration
                 Token(SyntaxKind.SemicolonToken));
             if (returnTypeAttribute is object)
             {
-                methodDeclaration = methodDeclaration
-                    .AddAttributeLists(
+                methodDeclaration = methodDeclaration.AddAttributeLists(
                     AttributeList().WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.ReturnKeyword))).AddAttributes(returnTypeAttribute));
             }
 
@@ -398,7 +397,7 @@ namespace Win32MetaGeneration
             if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
             {
                 methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
-                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration));
+                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration, GetClassNameForModule(moduleName)));
             }
 
             methodsList.Add(methodDeclaration);
@@ -445,7 +444,8 @@ namespace Win32MetaGeneration
             }
         }
 
-        private static string GetClassNameForModule(string moduleName) => moduleName.Replace('-', '_');
+        private static string GetClassNameForModule(string moduleName) =>
+            moduleName.StartsWith("api-") || moduleName.StartsWith("ext-") ? "ApiSets" : moduleName.Replace('-', '_');
 
         private static AttributeSyntax FieldOffset(int offset) => FieldOffsetAttributeSyntax.AddArgumentListArguments(AttributeArgument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(offset))));
 
@@ -993,7 +993,7 @@ namespace Win32MetaGeneration
             return result;
         }
 
-        private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration)
+        private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration, string declaringTypeName)
         {
             static ParameterSyntax StripAttributes(ParameterSyntax parameter) => parameter.WithAttributeLists(List<AttributeListSyntax>());
             static TypeSyntax MakeSpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("Span")).AddTypeArgumentListArguments(typeArgument));
@@ -1176,7 +1176,7 @@ namespace Win32MetaGeneration
                         XmlText("/// "),
                         XmlEmptyElement("inheritdoc").AddAttributes(XmlCrefAttribute(NameMemberCref(IdentifierName(externMethodDeclaration.Identifier), ToCref(externMethodDeclaration.ParameterList)))),
                         XmlText().AddTextTokens(XmlTextNewLine(TriviaList(), "\r\n", "\r\n", TriviaList()))));
-                InvocationExpressionSyntax externInvocation = InvocationExpression(IdentifierName(externMethodDeclaration.Identifier.Text))
+                InvocationExpressionSyntax externInvocation = InvocationExpression(QualifiedName(IdentifierName(declaringTypeName), IdentifierName(externMethodDeclaration.Identifier.Text)))
                     .AddArgumentListArguments(arguments.ToArray());
                 bool hasVoidReturn = externMethodDeclaration.ReturnType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.VoidKeyword } };
                 var body = Block()
