@@ -1062,6 +1062,18 @@ namespace Win32MetaGeneration
                                 PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName)))));
                         arguments[param.SequenceNumber - 1] = Argument(localName);
                     }
+                    else if (isIn && !isOut && !isOptional)
+                    {
+                        // Use the "in" modifier to avoid copying the struct.
+                        signatureChanged = true;
+                        parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
+                            .WithType(ptrType.ElementType)
+                            .WithModifiers(TokenList(Token(SyntaxKind.InKeyword)));
+                        fixedBlocks.Add(VariableDeclaration(ptrType).AddVariables(
+                            VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(
+                                PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName)))));
+                        arguments[param.SequenceNumber - 1] = Argument(localName);
+                    }
                 }
             }
 
