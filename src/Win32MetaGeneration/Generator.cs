@@ -1000,7 +1000,19 @@ namespace Win32MetaGeneration
                             .WithType(ptrType.ElementType)
                             .WithModifiers(TokenList(Token(SyntaxKind.RefKeyword)));
                         fixedBlocks.Add(VariableDeclaration(ptrType).AddVariables(
-                            VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(origName))));
+                            VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(
+                                PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName)))));
+                        arguments[param.SequenceNumber - 1] = Argument(localName);
+                    }
+                    else if (isOut && !isIn && !isOptional)
+                    {
+                        signatureChanged = true;
+                        parameters[param.SequenceNumber - 1] = parameters[param.SequenceNumber - 1]
+                            .WithType(ptrType.ElementType)
+                            .WithModifiers(TokenList(Token(SyntaxKind.OutKeyword)));
+                        fixedBlocks.Add(VariableDeclaration(ptrType).AddVariables(
+                            VariableDeclarator(localName.Identifier).WithInitializer(EqualsValueClause(
+                                PrefixUnaryExpression(SyntaxKind.AddressOfExpression, origName)))));
                         arguments[param.SequenceNumber - 1] = Argument(localName);
                     }
                 }
