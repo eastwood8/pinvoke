@@ -6,6 +6,7 @@ namespace Win32MetaGeneration
     using System;
     using System.Collections.Generic;
     using System.Diagnostics;
+    using System.Diagnostics.CodeAnalysis;
     using System.IO;
     using System.Linq;
     using System.Reflection;
@@ -217,6 +218,8 @@ namespace Win32MetaGeneration
                             UsingDirective(IdentifierName(nameof(System))),
                             UsingDirective(IdentifierName(nameof(System) + "." + nameof(System.Diagnostics))),
                             UsingDirective(ParseName(SystemRuntimeInteropServices))))
+                .WithLeadingTrivia(TriviaList(
+                    Trivia(PragmaWarningDirectiveTrivia(Token(SyntaxKind.DisableKeyword), true).WithErrorCodes(SingletonSeparatedList<ExpressionSyntax>(IdentifierName("CS1591"))))))
                 .NormalizeWhitespace();
         }
 
@@ -342,7 +345,7 @@ namespace Win32MetaGeneration
             MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
 
             var methodName = this.mr.GetString(methodDefinition.Name);
-            if (this.WideCharOnly && this.IsAnsiFunction(methodDefinition, methodName))
+            if (this.WideCharOnly && this.IsAnsiFunction(methodName))
             {
                 // Skip Ansi functions.
                 return;
@@ -357,14 +360,10 @@ namespace Win32MetaGeneration
             }
 
             string? entrypoint = null;
-            if (this.WideCharOnly && this.IsWideFunction(methodDefinition, methodName))
+            if (this.TryGetRenamedMethod(methodName, out string? newName))
             {
-                string newName = methodName.Substring(0, methodName.Length - 1);
-                if (!this.methodsByName.ContainsKey(newName))
-                {
-                    entrypoint = methodName;
-                    methodName = newName;
-                }
+                entrypoint = methodName;
+                methodName = newName;
             }
 
             CustomAttributeHandleCollection? returnTypeAttributes = this.GetReturnTypeCustomAttributes(methodDefinition);
@@ -546,6 +545,18 @@ namespace Win32MetaGeneration
                 default,
                 parameter.Type!);
 
+        private bool TryGetRenamedMethod(string methodName, [NotNullWhen(true)] out string? newName)
+        {
+            if (this.WideCharOnly && this.IsWideFunction(methodName))
+            {
+                newName = methodName.Substring(0, methodName.Length - 1);
+                return !this.methodsByName.ContainsKey(newName);
+            }
+
+            newName = null;
+            return false;
+        }
+
         private CustomAttributeHandleCollection? GetReturnTypeCustomAttributes(MethodDefinition methodDefinition)
         {
             CustomAttributeHandleCollection? returnTypeAttributes = null;
@@ -595,6 +606,7 @@ namespace Win32MetaGeneration
                 ? this.ReinterpretMethodSignatureType(releaseMethodSignature.ReturnType, atts).Type
                 : releaseMethodSignature.ReturnType;
             string safeHandleClassName = $"{releaseMethod}SafeHandle";
+            this.TryGetRenamedMethod(releaseMethod, out string? renamedReleaseMethod);
 
             var members = new List<MemberDeclarationSyntax>();
 
@@ -650,7 +662,7 @@ namespace Win32MetaGeneration
             //  * uint => zero is success
             //  * byte => non-zero is success
             ExpressionSyntax releaseInvocation = InvocationExpression(
-                MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, IdentifierName(releaseMethodModule), IdentifierName(releaseMethod)),
+                MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, IdentifierName(releaseMethodModule), IdentifierName(renamedReleaseMethod ?? releaseMethod)),
                 ArgumentList().AddArguments(Argument(thisHandle)));
             BlockSyntax? releaseBlock = null;
             if (!(releaseMethodReturnType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.BoolKeyword } }))
@@ -696,7 +708,7 @@ namespace Win32MetaGeneration
                 .AddBaseListTypes(SimpleBaseType(SafeHandleTypeSyntax))
                 .AddMembers(members.ToArray())
                 .WithLeadingTrivia(ParseLeadingTrivia($@"/// <summary>
-        /// Represents a Win32 handle that can be closed with <see cref=""{releaseMethodModule}.{releaseMethod}""/>.
+        /// Represents a Win32 handle that can be closed with <see cref=""{releaseMethodModule}.{renamedReleaseMethod ?? releaseMethod}""/>.
         /// </summary>
 "));
 
@@ -707,7 +719,7 @@ namespace Win32MetaGeneration
             return safeHandleType;
         }
 
-        private bool IsWideFunction(MethodDefinition method, string methodName)
+        private bool IsWideFunction(string methodName)
         {
             if (methodName.Length > 1 && methodName.EndsWith('W') && char.IsLower(methodName[methodName.Length - 2]))
             {
@@ -720,7 +732,7 @@ namespace Win32MetaGeneration
             return false;
         }
 
-        private bool IsAnsiFunction(MethodDefinition method, string methodName)
+        private bool IsAnsiFunction(string methodName)
         {
             if (methodName.Length > 1 && methodName.EndsWith('A') && char.IsLower(methodName[methodName.Length - 2]))
             {
