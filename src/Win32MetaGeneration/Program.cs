@@ -28,13 +28,12 @@ namespace Win32MetaGeneration
 
             try
             {
-                string pathToMetaLibrary = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "Win32MetadataLib.dll");
                 string outputDirectory = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "output");
                 Directory.CreateDirectory(outputDirectory);
 
                 var sw = Stopwatch.StartNew();
 
-                var generator = new Generator(pathToMetaLibrary)
+                var generator = new Generator()
                 {
                     WideCharOnly = true,
                 };

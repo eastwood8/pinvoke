@@ -5,6 +5,7 @@ namespace Win32MetaGeneration
 {
     using System;
     using System.Collections.Generic;
+    using System.Collections.Immutable;
     using System.Diagnostics;
     using System.Diagnostics.CodeAnalysis;
     using System.IO;
@@ -20,7 +21,7 @@ namespace Win32MetaGeneration
     using Microsoft.CodeAnalysis.CSharp.Syntax;
     using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
-    internal class Generator : IDisposable
+    public class Generator : IDisposable
     {
         internal static readonly Dictionary<string, TypeSyntax> BclInteropStructs = new Dictionary<string, TypeSyntax>(StringComparer.Ordinal)
         {
@@ -40,8 +41,8 @@ namespace Win32MetaGeneration
         /// This is the preferred capitalizations for modules and class names.
         /// If they are not in this list, the capitalization will come from the metadata assembly.
         /// </summary>
-        private static readonly HashSet<string> CanonicalCapitalizations = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
+        private static readonly ImmutableHashSet<string> CanonicalCapitalizations = ImmutableHashSet.Create<string>(
+            StringComparer.OrdinalIgnoreCase,
             "AdvApi32",
             "AuthZ",
             "BCrypt",
@@ -122,8 +123,7 @@ namespace Win32MetaGeneration
             "WksCli",
             "WLanApi",
             "WldAp32",
-            "WtsApi32",
-        };
+            "WtsApi32");
 
         private static readonly HashSet<string> CSharpKeywords = new HashSet<string>(StringComparer.Ordinal)
         {
@@ -156,7 +156,7 @@ namespace Win32MetaGeneration
 
         private static readonly SyntaxTokenList PublicModifiers = TokenList(Token(SyntaxKind.PublicKeyword));
 
-        private readonly FileStream metadataStream;
+        private readonly Stream metadataStream;
         private readonly PEReader peReader;
         private readonly MetadataReader mr;
         private readonly SignatureTypeProvider signatureTypeProvider;
@@ -184,18 +184,18 @@ namespace Win32MetaGeneration
 
         private readonly Dictionary<string, TypeSyntax?> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax?>();
 
-        internal Generator(string pathToMetaLibrary)
+        public Generator()
         {
-            var project = CSharpCompilation.Create("PInvoke")
-                .AddReferences(
-                    MetadataReference.CreateFromFile(pathToMetaLibrary, MetadataReferenceProperties.Assembly),
-                    MetadataReference.CreateFromFile(typeof(IntPtr).Assembly.Location));
+            Stream? metadataLibraryStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Win32.CodeGen.Win32MetadataLib.dll");
+            if (metadataLibraryStream is null)
+            {
+                throw new Exception("Metadata assembly not found.");
+            }
 
-            this.metadataStream = new FileStream(pathToMetaLibrary, FileMode.Open, FileAccess.Read, FileShare.Read);
+            this.metadataStream = metadataLibraryStream;
             this.peReader = new PEReader(this.metadataStream);
             this.mr = this.peReader.GetMetadataReader();
 
-            var workspace = new AdhocWorkspace();
             this.signatureTypeProvider = new SignatureTypeProvider(this);
             this.customAttributeTypeProvider = new CustomAttributeTypeProvider();
 
@@ -204,7 +204,7 @@ namespace Win32MetaGeneration
             this.methodsByName = this.Apis.GetMethods().ToDictionary(h => this.mr.GetString(this.mr.GetMethodDefinition(h).Name), StringComparer.Ordinal);
         }
 
-        internal CompilationUnitSyntax CompilationUnit
+        public CompilationUnitSyntax CompilationUnit
         {
             get => CompilationUnit()
                 .AddMembers(
@@ -223,13 +223,13 @@ namespace Win32MetaGeneration
                 .NormalizeWhitespace();
         }
 
+        public bool WideCharOnly { get; set; } = true;
+
         internal TypeDefinition Apis { get; }
 
         internal MetadataReader Reader => this.mr;
 
         internal LanguageVersion LanguageVersion { get; set; } = LanguageVersion.CSharp9;
-
-        internal bool WideCharOnly { get; set; } = true;
 
         internal string Namespace { get; set; } = "PInvoke.Windows";
 
@@ -245,7 +245,7 @@ namespace Win32MetaGeneration
             this.metadataStream.Dispose();
         }
 
-        internal void GenerateAll(CancellationToken cancellationToken)
+        public void GenerateAll(CancellationToken cancellationToken)
         {
             this.GenerateAllExternMethods(cancellationToken);
 
@@ -258,7 +258,7 @@ namespace Win32MetaGeneration
         /// Generates a projection of Win32 APIs.
         /// </summary>
         /// <param name="cancellationToken">A cancellation token.</param>
-        internal void GenerateAllExternMethods(CancellationToken cancellationToken)
+        public void GenerateAllExternMethods(CancellationToken cancellationToken)
         {
             foreach (MethodDefinitionHandle methodHandle in this.Apis.GetMethods())
             {
@@ -268,7 +268,7 @@ namespace Win32MetaGeneration
             }
         }
 
-        internal void GenerateAllExternMethods(string moduleName, CancellationToken cancellationToken)
+        public void GenerateAllExternMethods(string moduleName, CancellationToken cancellationToken)
         {
             foreach (MethodDefinitionHandle methodHandle in this.Apis.GetMethods())
             {
@@ -289,21 +289,7 @@ namespace Win32MetaGeneration
             }
         }
 
-        internal void GenerateAllInteropTypes(CancellationToken cancellationToken)
-        {
-            foreach (TypeDefinitionHandle typeDefinitionHandle in this.mr.TypeDefinitions)
-            {
-                TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefinitionHandle);
-                if (typeDef.BaseType.IsNil)
-                {
-                    continue;
-                }
-
-                this.GenerateInteropType(typeDefinitionHandle);
-            }
-        }
-
-        internal void GenerateExternMethod(string name)
+        public void GenerateExternMethod(string name)
         {
             if (this.methodsByName.TryGetValue(name, out MethodDefinitionHandle handle))
             {
@@ -319,6 +305,20 @@ namespace Win32MetaGeneration
             if (this.methodsByName.TryGetValue(name + "A", out handle))
             {
                 this.GenerateExternMethod(handle);
+            }
+        }
+
+        internal void GenerateAllInteropTypes(CancellationToken cancellationToken)
+        {
+            foreach (TypeDefinitionHandle typeDefinitionHandle in this.mr.TypeDefinitions)
+            {
+                TypeDefinition typeDef = this.mr.GetTypeDefinition(typeDefinitionHandle);
+                if (typeDef.BaseType.IsNil)
+                {
+                    continue;
+                }
+
+                this.GenerateInteropType(typeDefinitionHandle);
             }
         }
 
@@ -612,6 +612,7 @@ namespace Win32MetaGeneration
                 return null;
             }
 
+            // TODO: Reuse existing SafeHandle's defined in .NET where possible to facilitate interop with APIs that take them.
             string safeHandleClassName = $"{releaseMethod}SafeHandle";
             this.TryGetRenamedMethod(releaseMethod, out string? renamedReleaseMethod);
 
@@ -728,7 +729,7 @@ namespace Win32MetaGeneration
 
         private bool IsWideFunction(string methodName)
         {
-            if (methodName.Length > 1 && methodName.EndsWith('W') && char.IsLower(methodName[methodName.Length - 2]))
+            if (methodName.Length > 1 && methodName.EndsWith("W") && char.IsLower(methodName[methodName.Length - 2]))
             {
                 // The name looks very much like an Wide-char method.
                 // If further confidence is ever needed, we could look at the parameter and return types
@@ -741,7 +742,7 @@ namespace Win32MetaGeneration
 
         private bool IsAnsiFunction(string methodName)
         {
-            if (methodName.Length > 1 && methodName.EndsWith('A') && char.IsLower(methodName[methodName.Length - 2]))
+            if (methodName.Length > 1 && methodName.EndsWith("A") && char.IsLower(methodName[methodName.Length - 2]))
             {
                 // The name looks very much like an Ansi method.
                 // If further confidence is ever needed, we could look at the parameter and return types
@@ -780,6 +781,7 @@ namespace Win32MetaGeneration
             }
             else if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))
             {
+                // TODO: reuse .NET types like FileAccess
                 typeDeclaration = this.CreateInteropEnum(typeDef);
             }
             else if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(MulticastDelegate)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))

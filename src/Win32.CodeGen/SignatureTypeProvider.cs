@@ -9,7 +9,6 @@ namespace Win32MetaGeneration
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
-    using Microsoft.CodeAnalysis.Editing;
     using static Microsoft.CodeAnalysis.CSharp.SyntaxFactory;
 
     internal class SignatureTypeProvider : ISignatureTypeProvider<TypeSyntax, IGenericContext?>
