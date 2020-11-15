@@ -14,6 +14,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <EmbeddedResource Include="$(PkgMicrosoft_Windows_SDK_Win32Metadata)\content\Win32MetadataLib.dll" />
   </ItemGroup>
 

@@ -44,11 +44,11 @@ namespace Win32MetaGeneration
                         cts.Token.ThrowIfCancellationRequested();
                         if (name.EndsWith(".*"))
                         {
-                            generator.GenerateAllExternMethods(name.Substring(0, name.Length - 2), cts.Token);
+                            generator.TryGenerateAllExternMethods(name.Substring(0, name.Length - 2), cts.Token);
                         }
                         else
                         {
-                            generator.GenerateExternMethod(name);
+                            generator.TryGenerateExternMethod(name);
                         }
                     }
                 }

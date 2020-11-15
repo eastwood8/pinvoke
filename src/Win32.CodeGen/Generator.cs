@@ -268,8 +268,9 @@ namespace Win32MetaGeneration
             }
         }
 
-        public void GenerateAllExternMethods(string moduleName, CancellationToken cancellationToken)
+        public bool TryGenerateAllExternMethods(string moduleName, CancellationToken cancellationToken)
         {
+            bool successful = false;
             foreach (MethodDefinitionHandle methodHandle in this.Apis.GetMethods())
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -285,27 +286,35 @@ namespace Win32MetaGeneration
                 if (this.mr.StringComparer.Equals(module.Name, moduleName, ignoreCase: true))
                 {
                     this.GenerateExternMethod(methodHandle);
+                    successful = true;
                 }
             }
+
+            return successful;
         }
 
-        public void GenerateExternMethod(string name)
+        public bool TryGenerateExternMethod(string name)
         {
             if (this.methodsByName.TryGetValue(name, out MethodDefinitionHandle handle))
             {
                 this.GenerateExternMethod(handle);
-                return;
+                return true;
             }
 
+            bool successful = false;
             if (this.methodsByName.TryGetValue(name + "W", out handle))
             {
                 this.GenerateExternMethod(handle);
+                successful = true;
             }
 
             if (this.methodsByName.TryGetValue(name + "A", out handle))
             {
                 this.GenerateExternMethod(handle);
+                successful = true;
             }
+
+            return successful;
         }
 
         internal void GenerateAllInteropTypes(CancellationToken cancellationToken)
@@ -412,7 +421,7 @@ namespace Win32MetaGeneration
                         var args = att.DecodeValue(this.customAttributeTypeProvider);
                         if (args.FixedArguments[0].Value is string freeMethodName)
                         {
-                            this.GenerateExternMethod(freeMethodName);
+                            this.TryGenerateExternMethod(freeMethodName);
                         }
 
                         break;
