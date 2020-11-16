@@ -3,4 +3,8 @@
     <IsCodeGenerationProject>true</IsCodeGenerationProject>
   </PropertyGroup>
   <Import Project="$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory)../, Directory.Build.props))\Directory.Build.props" Condition=" '$([MSBuild]::GetDirectoryNameOfFileAbove($(MSBuildThisFileDirectory)../, Directory.Build.props))' != '' " />
+  <PropertyGroup>
+    <BaseOutputPath Condition=" '$(BaseOutputPath)' == '' ">$(RepoRootPath)bin\$(MSBuildProjectName)\</BaseOutputPath>
+    <OutputPath>$(RepoRootPath)bin\$(Configuration)\$(MSBuildProjectName)\</OutputPath>
+  </PropertyGroup>
 </Project>
