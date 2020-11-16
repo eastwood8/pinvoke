@@ -471,30 +471,16 @@ namespace Win32.CodeGen
                     foreach (var entry in docs.Parameters)
                     {
                         docCommentsBuilder.Append($@"/// <param name=""{entry.Key}"">");
-
-                        string paramDoc = entry.Value;
-                        if (paramDoc.Contains('\n'))
-                        {
-                            docCommentsBuilder.AppendLine();
-                            var docReader = new StringReader(paramDoc);
-                            string? paramDocLine;
-
-                            while ((paramDocLine = docReader.ReadLine()) is object)
-                            {
-                                docCommentsBuilder.Append("/// ");
-                                docCommentsBuilder.AppendLine(new XText(paramDocLine).ToString());
-                                break; // just read the first line for now till we can clean up what can come later.
-                            }
-
-                            docCommentsBuilder.AppendLine($@"/// <para>This doc was truncated. <see href=""{docs.HelpLink}#parameters"">Read the rest on docs.microsoft.com</see>.</para>");
-                            docCommentsBuilder.AppendLine("/// </param>");
-                        }
-                        else
-                        {
-                            docCommentsBuilder.Append(paramDoc);
-                            docCommentsBuilder.AppendLine("</param>");
-                        }
+                        EmitDoc(entry.Value, docCommentsBuilder, docs, "parameters");
+                        docCommentsBuilder.AppendLine("</param>");
                     }
+                }
+
+                if (docs.ReturnValue is object)
+                {
+                    docCommentsBuilder.Append("/// <returns>");
+                    EmitDoc(docs.ReturnValue, docCommentsBuilder, docs, "return-value");
+                    docCommentsBuilder.AppendLine("</returns>");
                 }
 
                 docCommentsBuilder.AppendLine($@"/// <remarks>
@@ -505,6 +491,30 @@ namespace Win32.CodeGen
             }
 
             return memberDeclaration;
+
+            static void EmitDoc(string paramDoc, StringBuilder docCommentsBuilder, Docs.ApiDetails docs, string docsAnchor)
+            {
+                if (paramDoc.Contains('\n'))
+                {
+                    docCommentsBuilder.AppendLine();
+                    var docReader = new StringReader(paramDoc);
+                    string? paramDocLine;
+
+                    while ((paramDocLine = docReader.ReadLine()) is object)
+                    {
+                        docCommentsBuilder.Append("/// ");
+                        docCommentsBuilder.AppendLine(new XText(paramDocLine).ToString());
+                        break; // just read the first line for now till we can clean up what can come later.
+                    }
+
+                    docCommentsBuilder.AppendLine($@"/// <para>This doc was truncated. <see href=""{docs.HelpLink}#{docsAnchor}"">Read the rest on docs.microsoft.com</see>.</para>");
+                    docCommentsBuilder.Append("/// ");
+                }
+                else
+                {
+                    docCommentsBuilder.Append(paramDoc);
+                }
+            }
         }
 
         private static string GetClassNameForModule(string moduleName) =>

@@ -18,6 +18,7 @@ namespace ScrapeDocs
     {
         private static readonly Regex FileNamePattern = new Regex(@"^\w\w-\w+-([\w\-]+)$", RegexOptions.Compiled);
         private static readonly Regex ParameterHeaderPattern = new Regex(@"^### -param (\w+)", RegexOptions.Compiled);
+        private static readonly Regex ReturnHeaderPattern = new Regex(@"^## -returns", RegexOptions.Compiled);
         private readonly string contentBasePath;
         private readonly string outputPath;
 
@@ -69,7 +70,9 @@ namespace ScrapeDocs
         private void Worker(CancellationToken cancellationToken)
         {
             Console.WriteLine("Enumerating documents to be parsed...");
-            string[] paths = Directory.GetFiles(this.contentBasePath, "??-*-*.md", SearchOption.AllDirectories);
+            string[] paths = Directory.GetFiles(this.contentBasePath, "??-*-*.md", SearchOption.AllDirectories)
+                ////.Where(p => Path.GetFileNameWithoutExtension(p).Contains("createfilew")).ToArray()
+                ;
 
             Console.WriteLine("Parsing documents...");
             var timer = Stopwatch.StartNew();
@@ -171,6 +174,11 @@ namespace ScrapeDocs
                 }
                 else
                 {
+                    if (line is object && ReturnHeaderPattern.IsMatch(line))
+                    {
+                        break;
+                    }
+
                     line = mdFileReader.ReadLine();
                 }
             }
@@ -180,9 +188,30 @@ namespace ScrapeDocs
                 methodNode.Add("Parameters", parametersMap);
             }
 
-            if (line is null)
+            // Search for return value documentation
+            while (line is object)
             {
-                return (properName, methodNode);
+                Match m = ReturnHeaderPattern.Match(line);
+                if (m.Success)
+                {
+                    while ((line = mdFileReader.ReadLine()) is object)
+                    {
+                        if (line.StartsWith('#'))
+                        {
+                            break;
+                        }
+
+                        docBuilder.AppendLine(line);
+                    }
+
+                    methodNode.Add("ReturnValue", docBuilder.ToString().Trim());
+                    docBuilder.Clear();
+                    break;
+                }
+                else
+                {
+                    line = mdFileReader.ReadLine();
+                }
             }
 
             return (properName, methodNode);
