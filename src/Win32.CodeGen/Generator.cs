@@ -15,6 +15,7 @@ namespace Win32.CodeGen
     using System.Reflection.PortableExecutable;
     using System.Runtime.CompilerServices;
     using System.Runtime.InteropServices;
+    using System.Text;
     using System.Threading;
     using System.Xml.Linq;
     using Microsoft.CodeAnalysis;
@@ -403,17 +404,7 @@ namespace Win32.CodeGen
             }
 
             // Add documentation if we can find it.
-            if (Docs.Instance.TryGetApiDocs(entrypoint ?? methodName, out var docs))
-            {
-                methodDeclaration = methodDeclaration.WithLeadingTrivia(
-                    ParseLeadingTrivia($@"/// <summary>
-/// {new XText(docs.Description)}
-/// </summary>
-/// <remarks>
-/// <see href=""{docs.HelpLink}"">Learn more about this API from docs.microsoft.com</see>.
-/// </remarks>
-"));
-            }
+            methodDeclaration = AddApiDocumentation(entrypoint ?? methodName, methodDeclaration);
 
             List<MemberDeclarationSyntax> methodsList = this.GetModuleMemberList(moduleName);
             if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
@@ -464,6 +455,56 @@ namespace Win32.CodeGen
             {
                 this.types.Add(typeDefHandle, typeDeclaration);
             }
+        }
+
+        private static T AddApiDocumentation<T>(string api, T memberDeclaration)
+            where T : MemberDeclarationSyntax
+        {
+            if (Docs.Instance.TryGetApiDocs(api, out var docs))
+            {
+                var docCommentsBuilder = new StringBuilder();
+                docCommentsBuilder.AppendLine($@"/// <summary>
+/// {new XText(docs.Description)}
+/// </summary>");
+                if (docs.Parameters is object)
+                {
+                    foreach (var entry in docs.Parameters)
+                    {
+                        docCommentsBuilder.Append($@"/// <param name=""{entry.Key}"">");
+
+                        string paramDoc = entry.Value;
+                        if (paramDoc.Contains('\n'))
+                        {
+                            docCommentsBuilder.AppendLine();
+                            var docReader = new StringReader(paramDoc);
+                            string? paramDocLine;
+
+                            while ((paramDocLine = docReader.ReadLine()) is object)
+                            {
+                                docCommentsBuilder.Append("/// ");
+                                docCommentsBuilder.AppendLine(new XText(paramDocLine).ToString());
+                                break; // just read the first line for now till we can clean up what can come later.
+                            }
+
+                            docCommentsBuilder.AppendLine($@"/// <para>This doc was truncated. <see href=""{docs.HelpLink}#parameters"">Read the rest on docs.microsoft.com</see>.</para>");
+                            docCommentsBuilder.AppendLine("/// </param>");
+                        }
+                        else
+                        {
+                            docCommentsBuilder.Append(paramDoc);
+                            docCommentsBuilder.AppendLine("</param>");
+                        }
+                    }
+                }
+
+                docCommentsBuilder.AppendLine($@"/// <remarks>
+/// <see href=""{docs.HelpLink}"">Learn more about this API from docs.microsoft.com</see>.
+/// </remarks>");
+                memberDeclaration = memberDeclaration.WithLeadingTrivia(
+                    ParseLeadingTrivia(docCommentsBuilder.ToString()));
+            }
+
+            return memberDeclaration;
         }
 
         private static string GetClassNameForModule(string moduleName) =>
@@ -976,6 +1017,8 @@ namespace Win32.CodeGen
                 result = result.AddAttributeLists(AttributeList().AddAttributes(GUID(guid)));
             }
 
+            result = AddApiDocumentation(name, result);
+
             return result;
         }
 
@@ -1034,6 +1077,8 @@ namespace Win32.CodeGen
                     AttributeList().AddAttributes(FlagsAttributeSyntax));
             }
 
+            result = AddApiDocumentation(name, result);
+
             return result;
         }
 
@@ -1060,6 +1105,7 @@ namespace Win32.CodeGen
                 // * Review double/triple pointer scenarios.
                 // * Review pointers to COM pointer scenarios.
                 // * Add nullable annotations on COM interfaces that are annotated as optional.
+                // * Create an overload with fewer parameters when one parameter describes the length of another.
                 if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType
                     && !(ptrType.ElementType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.VoidKeyword } }))
                 {

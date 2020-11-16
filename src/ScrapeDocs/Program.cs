@@ -17,6 +17,7 @@ namespace ScrapeDocs
     internal class Program
     {
         private static readonly Regex FileNamePattern = new Regex(@"^\w\w-\w+-([\w\-]+)$", RegexOptions.Compiled);
+        private static readonly Regex ParameterHeaderPattern = new Regex(@"^### -param (\w+)", RegexOptions.Compiled);
         private readonly string contentBasePath;
         private readonly string outputPath;
 
@@ -77,10 +78,15 @@ namespace ScrapeDocs
                               where result is { }
                               select (Path: path, result.Value.ApiName, result.Value.YamlNode);
             var results = new ConcurrentDictionary<YamlNode, YamlNode>();
+            if (Debugger.IsAttached)
+            {
+                parsedNodes = parsedNodes.WithDegreeOfParallelism(1); // improve debuggability
+            }
+
             parsedNodes
                 .WithCancellation(cancellationToken)
                 .ForAll(result => results.TryAdd(new YamlScalarNode(result.ApiName), result.YamlNode));
-            Console.WriteLine("Parsing time: {0} ({1} per document)", timer.Elapsed, timer.Elapsed / paths.Length);
+            Console.WriteLine("Parsed {2} documents in {0} ({1} per document)", timer.Elapsed, timer.Elapsed / paths.Length, paths.Length);
 
             Console.WriteLine("Writing results to \"{0}\"", this.outputPath);
             var yamlDocument = new YamlDocument(new YamlMappingNode(results));
@@ -131,6 +137,52 @@ namespace ScrapeDocs
             if (description is object)
             {
                 methodNode.Add("Description", description);
+            }
+
+            // Search for parameter docs
+            var parametersMap = new YamlMappingNode();
+            var docBuilder = new StringBuilder();
+            line = mdFileReader.ReadLine();
+            while (line is object)
+            {
+                Match m = ParameterHeaderPattern.Match(line);
+                if (m.Success)
+                {
+                    string parameterName = m.Groups[1].Value;
+                    while ((line = mdFileReader.ReadLine()) is object)
+                    {
+                        if (line.StartsWith('#'))
+                        {
+                            break;
+                        }
+
+                        docBuilder.AppendLine(line);
+                    }
+
+                    try
+                    {
+                        parametersMap.Add(parameterName, docBuilder.ToString().Trim());
+                    }
+                    catch (ArgumentException)
+                    {
+                    }
+
+                    docBuilder.Clear();
+                }
+                else
+                {
+                    line = mdFileReader.ReadLine();
+                }
+            }
+
+            if (parametersMap.Any())
+            {
+                methodNode.Add("Parameters", parametersMap);
+            }
+
+            if (line is null)
+            {
+                return (properName, methodNode);
             }
 
             return (properName, methodNode);

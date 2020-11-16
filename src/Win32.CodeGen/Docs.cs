@@ -42,6 +42,8 @@ namespace Win32.CodeGen
             public Uri? HelpLink { get; set; }
 
             public string? Description { get; set; }
+
+            public Dictionary<string, string>? Parameters { get; set; }
         }
     }
 }
