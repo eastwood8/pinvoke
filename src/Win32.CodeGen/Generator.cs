@@ -1006,6 +1006,7 @@ namespace Win32.CodeGen
                     field = field.AddAttributeLists(AttributeList().AddAttributes(FieldOffset(offset)));
                 }
 
+                // TODO: add field API documentation.
                 members.Add(field);
             }
 
