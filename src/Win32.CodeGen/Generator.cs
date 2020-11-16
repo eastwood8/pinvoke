@@ -16,6 +16,7 @@ namespace Win32.CodeGen
     using System.Runtime.CompilerServices;
     using System.Runtime.InteropServices;
     using System.Threading;
+    using System.Xml.Linq;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -399,6 +400,19 @@ namespace Win32.CodeGen
             {
                 methodDeclaration = methodDeclaration.AddAttributeLists(
                     AttributeList().WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.ReturnKeyword))).AddAttributes(returnTypeAttribute));
+            }
+
+            // Add documentation if we can find it.
+            if (Docs.Instance.TryGetApiDocs(entrypoint ?? methodName, out var docs))
+            {
+                methodDeclaration = methodDeclaration.WithLeadingTrivia(
+                    ParseLeadingTrivia($@"/// <summary>
+/// {new XText(docs.Description)}
+/// </summary>
+/// <remarks>
+/// <see href=""{docs.HelpLink}"">Learn more about this API from docs.microsoft.com</see>.
+/// </remarks>
+"));
             }
 
             List<MemberDeclarationSyntax> methodsList = this.GetModuleMemberList(moduleName);

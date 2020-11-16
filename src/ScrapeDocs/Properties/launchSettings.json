@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "ScrapeDocs": {
+      "commandName": "Project",
+      "commandLineArgs": "..\\..\\..\\ext\\sdk-api\\sdk-api-src\\content ..\\..\\..\\obj\\apidocs.yml"
+    }
+  }
+}
