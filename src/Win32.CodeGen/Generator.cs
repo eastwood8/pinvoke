@@ -463,9 +463,13 @@ namespace Win32.CodeGen
             if (Docs.Instance.TryGetApiDocs(api, out var docs))
             {
                 var docCommentsBuilder = new StringBuilder();
-                docCommentsBuilder.AppendLine($@"/// <summary>
-/// {new XText(docs.Description)}
-/// </summary>");
+                if (docs.Description is object)
+                {
+                    docCommentsBuilder.Append($@"/// <summary>");
+                    EmitDoc(docs.Description, docCommentsBuilder, docs, string.Empty);
+                    docCommentsBuilder.AppendLine("</summary>");
+                }
+
                 if (docs.Parameters is object)
                 {
                     foreach (var entry in docs.Parameters)
@@ -494,6 +498,10 @@ namespace Win32.CodeGen
 
             static void EmitDoc(string paramDoc, StringBuilder docCommentsBuilder, Docs.ApiDetails docs, string docsAnchor)
             {
+                // TODO: refine docs by
+                // * replacing relative hyperlinks with absolute ones and translate tags.
+                // * replace certain HTML tags with xml doc comment equivalents and bypass escaping.
+                // * include more than just the first line; perhaps at least the first complete sentence.
                 if (paramDoc.Contains('\n'))
                 {
                     docCommentsBuilder.AppendLine();
@@ -512,7 +520,7 @@ namespace Win32.CodeGen
                 }
                 else
                 {
-                    docCommentsBuilder.Append(paramDoc);
+                    docCommentsBuilder.Append(new XText(paramDoc).ToString());
                 }
             }
         }
