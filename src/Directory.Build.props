@@ -6,7 +6,7 @@
     <BaseOutputPath Condition=" '$(BaseOutputPath)' == '' ">$(RepoRootPath)bin\</BaseOutputPath>
     <PackageOutputPath>$(RepoRootPath)bin\$(Configuration)\Packages\</PackageOutputPath>
 
-    <LangVersion>8.0</LangVersion>
+    <LangVersion>9.0</LangVersion>
     <!-- <Nullable>enable</Nullable> -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
@@ -72,6 +72,7 @@
   <ItemGroup>
     <GeneratorAssemblySearchPaths Include="$(RepoRootPath)bin\$(Configuration)\netstandard2.0\" />
     <AdditionalFiles Include="$(MSBuildThisFileDirectory)stylecop.json"/>
+    <AdditionalFiles Include="NativeMethods.txt" Condition="Exists('NativeMethods.txt')" />
     <None Include="$(MSBuildProjectName).exports.txt" Condition=" Exists('$(MSBuildProjectName).exports.txt') and '$(TargetFramework)' == 'net45' ">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -90,6 +91,13 @@
       <Private>false</Private>
     </ProjectReference>
     <ProjectReference Include="..\CodeGeneration\CodeGeneration.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
+      <UndefineProperties>TargetFramework</UndefineProperties>
+      <Private>false</Private>
+    </ProjectReference>
+    <ProjectReference Include="..\Win32.CodeGen\Win32.CodeGen.csproj" Condition="Exists('NativeMethods.txt')">
+      <OutputItemType>Analyzer</OutputItemType>
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
       <SkipGetTargetFrameworkProperties>true</SkipGetTargetFrameworkProperties>
       <UndefineProperties>TargetFramework</UndefineProperties>
