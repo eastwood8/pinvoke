@@ -55,7 +55,9 @@ namespace Win32.CodeGen
                     generator.GenerateAll(cts.Token);
                 }
 
-                using var generatedSourceStream = new FileStream(Path.Combine(outputDirectory, "NativeMethods.cs"), FileMode.Create, FileAccess.Write, FileShare.Read);
+                string outputPath = Path.Combine(outputDirectory, "NativeMethods.cs");
+                Console.WriteLine("Writing output file: {0}", outputPath);
+                using var generatedSourceStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
                 using var generatedSourceWriter = new StreamWriter(generatedSourceStream, Encoding.UTF8);
                 generator.CompilationUnit.WriteTo(generatedSourceWriter);
 
