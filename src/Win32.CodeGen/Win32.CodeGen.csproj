@@ -10,10 +10,9 @@
     <IncludeBuildOutput>false</IncludeBuildOutput>
     <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <IncludeSymbols>false</IncludeSymbols>
-    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);PackBuildOutputs</TargetsForTfmSpecificContentInPackage>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
-  
+
   <ItemGroup>
     <YamlDocOutputPath Include="../../obj/$(Configuration)/apidocs.yml" Visible="false" />
   </ItemGroup>
@@ -37,28 +36,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\ScrapeDocs\ScrapeDocs.csproj" ReferenceOutputAssembly="false" OutputItemType="ScraperTool" SkipGetTargetFrameworkProperties="true" />
+    <ProjectReference Include="..\ScrapeDocs\ScrapeDocs.csproj" ReferenceOutputAssembly="false" OutputItemType="ScraperTool" SetTargetFramework="TargetFramework=netcoreapp3.1" />
   </ItemGroup>
 
-  <Target Name="GenerateAndConsumeDocsYaml"
-          DependsOnTargets="ResolveProjectReferences"
-          BeforeTargets="CoreCompile"
-          Inputs="@(ScraperTool)"
-          Outputs="@(YamlDocOutputPath)"
-          Condition=" '$(DesignTimeBuild)' != 'true' ">
-    <Message Importance="high" Text="Regenerating @(YamlDocOutputPath->'%(FullPath)'). This may take a few minutes..." />
-    <Exec Command="dotnet @(ScraperTool) ../../ext/sdk-api/sdk-api-src/content @(YamlDocOutputPath)" 
-          StandardOutputImportance="high"/>
-  </Target>
-  
-  <Target Name="PackBuildOutputs" DependsOnTargets="ResolveProjectReferences;SatelliteDllsProjectOutputGroup;SatelliteDllsProjectOutputGroupDependencies">
-    <ItemGroup>
-      <!-- Analysis of C# projects -->
-      <TfmSpecificPackageFile Include="$(TargetPath)" PackagePath="analyzers\cs\" />
-      <TfmSpecificPackageFile Include="@(ReferencePath)" PackagePath="analyzers\cs\" Condition=" '%(FileName)%(Extension)' == 'YamlDotNet.dll' " />
-      <TfmSpecificPackageFile Include="@(SatelliteDllsProjectOutputGroupDependency)" PackagePath="analyzers\cs\%(SatelliteDllsProjectOutputGroupDependency.DestinationSubDirectory)" Condition=" '%(SatelliteDllsProjectOutputGroupDependency.DestinationSubDirectory)' != '' " />
-      <TfmSpecificPackageFile Include="@(SatelliteDllsProjectOutputGroupOutput->'%(FinalOutputPath)')" PackagePath="analyzers\cs\%(SatelliteDllsProjectOutputGroupOutput.Culture)\" />
-      <TfmSpecificPackageFile Include="%(_ResolvedProjectReferencePaths.Identity)" PackagePath="analyzers\cs\" />
-    </ItemGroup>
-  </Target>
+  <Import Project="Win32.CodeGen.targets"/>
 </Project>
