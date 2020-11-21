@@ -57,6 +57,11 @@ namespace Win32.CodeGen
             {
                 context.CancellationToken.ThrowIfCancellationRequested();
                 string name = line.ToString();
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    continue;
+                }
+
                 var location = Location.Create(nativeMethodsFile.Path, line.Span, nativeMethodsTxt.Lines.GetLinePositionSpan(line.Span));
                 if (name.EndsWith(".*"))
                 {
