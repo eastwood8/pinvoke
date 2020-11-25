@@ -180,6 +180,8 @@ namespace Win32.CodeGen
         /// </summary>
         private readonly Dictionary<TypeDefinitionHandle, MemberDeclarationSyntax> types = new Dictionary<TypeDefinitionHandle, MemberDeclarationSyntax>();
 
+        private readonly List<ClassDeclarationSyntax> safeHandleTypes = new List<ClassDeclarationSyntax>();
+
         /// <summary>
         /// The set of types that are or have been generated so we don't stack overflow for self-referencing types.
         /// </summary>
@@ -221,11 +223,7 @@ namespace Win32.CodeGen
             get => CompilationUnit()
                 .AddMembers(
                     NamespaceDeclaration(ParseName(this.Namespace))
-                        .AddMembers(this.MembersByClass.Select(kv =>
-                            ClassDeclaration(Identifier(GetClassNameForModule(kv.Key)))
-                                .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
-                                .AddMembers(kv.ToArray())).ToArray())
-                                .AddMembers(this.types.Values.ToArray())
+                        .AddMembers(this.NamespaceMembers.ToArray())
                         .AddUsings(
                             UsingDirective(IdentifierName(nameof(System))),
                             UsingDirective(IdentifierName(nameof(System) + "." + nameof(System.Diagnostics))),
@@ -237,13 +235,33 @@ namespace Win32.CodeGen
 
         public bool WideCharOnly { get; set; } = true;
 
+        public bool GroupByModule { get; set; } = true;
+
         internal TypeDefinition Apis { get; }
 
         internal MetadataReader Reader => this.mr;
 
         internal LanguageVersion LanguageVersion { get; set; } = LanguageVersion.CSharp9;
 
-        internal string Namespace { get; set; } = "PInvoke.Windows";
+        internal string Namespace { get; set; } = "Microsoft.Windows.Sdk";
+
+        internal string SingleClassName { get; set; } = "PInvoke";
+
+        private IEnumerable<MemberDeclarationSyntax> NamespaceMembers =>
+            this.GroupByModule ?
+                this.MembersByClass.Select(kv =>
+                    ClassDeclaration(Identifier(GetClassNameForModule(kv.Key)))
+                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
+                        .AddMembers(kv.ToArray()))
+                    .Concat(this.types.Values.ToArray()) :
+                new MemberDeclarationSyntax[]
+                {
+                    ClassDeclaration(Identifier(this.SingleClassName))
+                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
+                        .AddMembers(this.MembersByClass.SelectMany(kv => kv).ToArray()),
+                }
+                .Concat(this.safeHandleTypes)
+                .Concat(this.types.Values);
 
         private IEnumerable<IGrouping<string, MemberDeclarationSyntax>> MembersByClass =>
             from entry in this.modulesAndMembers
@@ -420,7 +438,7 @@ namespace Win32.CodeGen
             if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
             {
                 methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
-                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration, GetClassNameForModule(moduleName)));
+                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration, this.GroupByModule ? GetClassNameForModule(moduleName) : this.SingleClassName));
             }
 
             methodsList.Add(methodDeclaration);
@@ -762,7 +780,10 @@ namespace Win32.CodeGen
             //  * uint => zero is success
             //  * byte => non-zero is success
             ExpressionSyntax releaseInvocation = InvocationExpression(
-                MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, IdentifierName(releaseMethodModule), IdentifierName(renamedReleaseMethod ?? releaseMethod)),
+                MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    IdentifierName(this.GroupByModule ? releaseMethodModule : this.SingleClassName),
+                    IdentifierName(renamedReleaseMethod ?? releaseMethod)),
                 ArgumentList().AddArguments(Argument(thisHandle)));
             BlockSyntax? releaseBlock = null;
             if (!(releaseMethodReturnType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.BoolKeyword } }))
@@ -808,13 +829,21 @@ namespace Win32.CodeGen
                 .AddBaseListTypes(SimpleBaseType(SafeHandleTypeSyntax))
                 .AddMembers(members.ToArray())
                 .WithLeadingTrivia(ParseLeadingTrivia($@"/// <summary>
-        /// Represents a Win32 handle that can be closed with <see cref=""{releaseMethodModule}.{renamedReleaseMethod ?? releaseMethod}""/>.
+        /// Represents a Win32 handle that can be closed with <see cref=""{(this.GroupByModule ? releaseMethodModule : this.SingleClassName)}.{renamedReleaseMethod ?? releaseMethod}""/>.
         /// </summary>
 "));
 
-            this.GetModuleMemberList(releaseMethodModule).Add(safeHandleDeclaration);
+            this.safeHandleTypes.Add(safeHandleDeclaration);
+            if (this.GroupByModule)
+            {
+                this.GetModuleMemberList(releaseMethodModule).Add(safeHandleDeclaration);
+            }
 
-            safeHandleType = QualifiedName(IdentifierName(releaseMethodModule), IdentifierName(safeHandleDeclaration.Identifier));
+            var safeHandleTypeIdentifier = IdentifierName(safeHandleDeclaration.Identifier);
+            safeHandleType = this.GroupByModule
+                ? QualifiedName(IdentifierName(releaseMethodModule), safeHandleTypeIdentifier)
+                : safeHandleTypeIdentifier;
+
             this.releaseMethodsWithSafeHandleTypesGenerating.Add(releaseMethod, safeHandleType);
             return safeHandleType;
         }

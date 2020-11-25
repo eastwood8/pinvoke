@@ -39,7 +39,10 @@ namespace Win32.CodeGen
 
         public void Execute(GeneratorExecutionContext context)
         {
-            var generator = new Generator();
+            var generator = new Generator
+            {
+                GroupByModule = false,
+            };
             AdditionalText? nativeMethodsFile = context.AdditionalFiles
                 .FirstOrDefault(af => string.Equals(Path.GetFileName(af.Path), NativeMethodsAdditionalFileName, StringComparison.OrdinalIgnoreCase));
             if (nativeMethodsFile is null)
