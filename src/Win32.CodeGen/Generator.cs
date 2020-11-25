@@ -28,6 +28,7 @@ namespace Win32.CodeGen
         internal static readonly Dictionary<string, TypeSyntax> BclInteropStructs = new Dictionary<string, TypeSyntax>(StringComparer.Ordinal)
         {
             { nameof(System.Runtime.InteropServices.ComTypes.FILETIME), ParseTypeName("System.Runtime.InteropServices.ComTypes.FILETIME") },
+            { "IUnknown", PredefinedType(Token(SyntaxKind.ObjectKeyword)) },
         };
 
         private const string SystemRuntimeCompilerServices = "System.Runtime.CompilerServices";
@@ -416,8 +417,6 @@ namespace Win32.CodeGen
                 return;
             }
 
-            MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
-
             var methodName = this.mr.GetString(methodDefinition.Name);
             if (this.WideCharOnly && this.IsAnsiFunction(methodName))
             {
@@ -440,6 +439,7 @@ namespace Win32.CodeGen
                 methodName = newName;
             }
 
+            MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
             CustomAttributeHandleCollection? returnTypeAttributes = this.GetReturnTypeCustomAttributes(methodDefinition);
 
             TypeSyntax returnType = signature.ReturnType;
@@ -638,6 +638,15 @@ namespace Win32.CodeGen
         {
             return Attribute(IdentifierName("Guid")).AddArgumentListArguments(
                 AttributeArgument(LiteralExpression(SyntaxKind.StringLiteralExpression, Literal(guid.ToString().ToUpperInvariant()))));
+        }
+
+        private static AttributeSyntax InterfaceType(ComInterfaceType interfaceType)
+        {
+            return Attribute(IdentifierName("InterfaceType")).AddArgumentListArguments(
+                AttributeArgument(MemberAccessExpression(
+                    SyntaxKind.SimpleMemberAccessExpression,
+                    IdentifierName(nameof(ComInterfaceType)),
+                    IdentifierName(Enum.GetName(typeof(ComInterfaceType), interfaceType)!))));
         }
 
         private static AttributeSyntax DllImport(MethodDefinition methodDefinition, MethodImport import, string moduleName, string? entrypoint)
@@ -936,10 +945,38 @@ namespace Win32.CodeGen
                 return null;
             }
 
-            var baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
-            MemberDeclarationSyntax typeDeclaration;
+            StringHandle baseTypeName, baseTypeNamespace;
+            if (typeDef.BaseType.IsNil)
+            {
+                baseTypeName = default;
+                baseTypeNamespace = default;
+            }
+            else
+            {
+                switch (typeDef.BaseType.Kind)
+                {
+                    case HandleKind.TypeReference:
+                        TypeReference baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
+                        baseTypeName = baseTypeRef.Name;
+                        baseTypeNamespace = baseTypeRef.Namespace;
+                        break;
+                    case HandleKind.TypeDefinition:
+                        TypeDefinition baseTypeDef = this.mr.GetTypeDefinition((TypeDefinitionHandle)typeDef.BaseType);
+                        baseTypeName = baseTypeDef.Name;
+                        baseTypeNamespace = baseTypeDef.Namespace;
+                        break;
+                    default:
+                        throw new NotSupportedException("Unsupported base type handle: " + typeDef.BaseType.Kind);
+                }
+            }
 
-            if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(ValueType)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))
+            MemberDeclarationSyntax? typeDeclaration;
+
+            if ((typeDef.Attributes & TypeAttributes.Interface) == TypeAttributes.Interface)
+            {
+                typeDeclaration = this.CreateInterface(typeDef);
+            }
+            else if (this.mr.StringComparer.Equals(baseTypeName, nameof(ValueType)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
             {
                 StructDeclarationSyntax structDeclaration = this.CreateInteropStruct(typeDef);
 
@@ -954,12 +991,12 @@ namespace Win32.CodeGen
 
                 typeDeclaration = structDeclaration;
             }
-            else if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))
+            else if (this.mr.StringComparer.Equals(baseTypeName, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
             {
                 // TODO: reuse .NET types like FileAccess
                 typeDeclaration = this.CreateInteropEnum(typeDef);
             }
-            else if (this.mr.StringComparer.Equals(baseTypeRef.Name, nameof(MulticastDelegate)) && this.mr.StringComparer.Equals(baseTypeRef.Namespace, nameof(System)))
+            else if (this.mr.StringComparer.Equals(baseTypeName, nameof(MulticastDelegate)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
             {
                 typeDeclaration = this.CreateInteropDelegate(typeDef);
             }
@@ -970,6 +1007,91 @@ namespace Win32.CodeGen
             }
 
             return typeDeclaration;
+        }
+
+        private MemberDeclarationSyntax? CreateInterface(TypeDefinition typeDef)
+        {
+            string ifaceName = this.mr.GetString(typeDef.Name);
+
+            ComInterfaceType? interfaceType = null;
+            Guid guid = Guid.Empty;
+            foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
+            {
+                var att = this.mr.GetCustomAttribute(attHandle);
+                if (this.IsAttribute(att, SystemRuntimeInteropServices, nameof(InterfaceTypeAttribute)))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    interfaceType = (ComInterfaceType)args.FixedArguments[0].Value!;
+                }
+                else if (this.IsAttribute(att, SystemRuntimeInteropServices, nameof(GuidAttribute)))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    guid = Guid.Parse((string)args.FixedArguments[0].Value!);
+                }
+            }
+
+            var members = new List<MemberDeclarationSyntax>();
+            foreach (MethodDefinitionHandle methodDefHandle in typeDef.GetMethods())
+            {
+                var methodDefinition = this.mr.GetMethodDefinition(methodDefHandle);
+                string methodName = this.mr.GetString(methodDefinition.Name);
+
+                MethodSignature<TypeSyntax> signature = methodDefinition.DecodeSignature(this.signatureTypeProvider, null);
+                CustomAttributeHandleCollection? returnTypeAttributes = this.GetReturnTypeCustomAttributes(methodDefinition);
+
+                TypeSyntax returnType = signature.ReturnType;
+                AttributeSyntax? returnTypeAttribute = null;
+                if (returnTypeAttributes.HasValue)
+                {
+                    (returnType, returnTypeAttribute) = this.ReinterpretMethodSignatureType(signature.ReturnType, returnTypeAttributes.Value);
+                }
+
+                MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
+                    List<AttributeListSyntax>(),
+                    modifiers: default,
+                    returnType,
+                    explicitInterfaceSpecifier: null!,
+                    SafeIdentifier(methodName),
+                    null!,
+                    this.CreateParameterList(methodDefinition, signature),
+                    List<TypeParameterConstraintClauseSyntax>(),
+                    body: null!,
+                    Token(SyntaxKind.SemicolonToken));
+                if (returnTypeAttribute is object)
+                {
+                    methodDeclaration = methodDeclaration.AddAttributeLists(
+                        AttributeList().WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.ReturnKeyword))).AddAttributes(returnTypeAttribute));
+                }
+
+                if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
+                {
+                    methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
+                }
+
+                // Add documentation if we can find it.
+                methodDeclaration = AddApiDocumentation($"{ifaceName}::{methodName}", methodDeclaration);
+
+                // TODO: generate friendly overloads as extension methods.
+                //// Code here
+
+                members.Add(methodDeclaration);
+            }
+
+            var iface = InterfaceDeclaration(ifaceName)
+                .AddMembers(members.ToArray())
+                .AddModifiers(Token(SyntaxKind.PublicKeyword));
+
+            if (guid != Guid.Empty)
+            {
+                iface = iface.AddAttributeLists().AddAttributeLists(AttributeList().AddAttributes(GUID(guid)));
+            }
+
+            if (interfaceType is object)
+            {
+                iface = iface.AddAttributeLists().AddAttributeLists(AttributeList().AddAttributes(InterfaceType(interfaceType.Value)));
+            }
+
+            return iface;
         }
 
         private void InitializeNestedToDeclaringLookupDictionary()
@@ -1458,11 +1580,20 @@ namespace Win32.CodeGen
             // * Add [Friendly] attributes
             // * Notice [Out][RIAAFree] handle producing parameters. Can we make these provide SafeHandle's?
             var parameterInfo = this.ReinterpretMethodSignatureType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetCustomAttributes());
+            bool isComOutPtr = parameter.GetCustomAttributes().Any(ah => this.IsAttribute(this.mr.GetCustomAttribute(ah), InteropDecorationNamespace, "ComOutPtrAttribute"));
 
             // Determine the custom attributes to apply.
             var attributes = AttributeList();
-            if (parameterInfo.Type is PointerTypeSyntax)
+            if (parameterInfo.Type is PointerTypeSyntax ptr)
             {
+                // Is there a ComOutPtrAttribute on the parameter?
+                if (isComOutPtr)
+                {
+                    parameterInfo = ptr.ElementType.IsEquivalentTo(VoidStar)
+                        ? (PredefinedType(Token(SyntaxKind.ObjectKeyword)), default)
+                        : (ptr.ElementType, default);
+                }
+
                 if ((parameter.Attributes & ParameterAttributes.In) == ParameterAttributes.In)
                 {
                     attributes = attributes.AddAttributes(InAttributeSyntax);
@@ -1492,6 +1623,11 @@ namespace Win32.CodeGen
             {
                 parameterSyntax = parameterSyntax
                     .AddAttributeLists(AttributeList().AddAttributes(parameterInfo.MarshalAsAttribute));
+            }
+
+            if (isComOutPtr)
+            {
+                parameterSyntax = parameterSyntax.AddModifiers(Token(SyntaxKind.OutKeyword));
             }
 
             return parameterSyntax;
@@ -1625,7 +1761,6 @@ namespace Win32.CodeGen
                 // {
                 //     private TheStruct _1, _2, _3, _4, _5, _6, _7, _8;
                 // }
-
                 var fixedLengthStruct = StructDeclaration($"__{arrayType.ElementType}_{length}")
                     .AddModifiers(Token(SyntaxKind.PrivateKeyword))
                     .AddMembers(FieldDeclaration(VariableDeclaration(arrayType.ElementType)
