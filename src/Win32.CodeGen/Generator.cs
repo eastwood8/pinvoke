@@ -49,6 +49,7 @@ namespace Win32.CodeGen
 
         private static readonly TypeSyntax SafeHandleTypeSyntax = IdentifierName("SafeHandle");
         private static readonly IdentifierNameSyntax IntPtrTypeSyntax = IdentifierName(nameof(IntPtr));
+        private static readonly TypeSyntax VoidStar = SyntaxFactory.ParseTypeName("void*");
 
         /// <summary>
         /// This is the preferred capitalizations for modules and class names.
@@ -704,6 +705,10 @@ namespace Win32.CodeGen
                 default,
                 parameter.Type!);
 
+        private static TypeSyntax MakeSpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("Span")).AddTypeArgumentListArguments(typeArgument));
+
+        private static TypeSyntax MakeReadOnlySpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("ReadOnlySpan")).AddTypeArgumentListArguments(typeArgument));
+
         private bool TryGetRenamedMethod(string methodName, [NotNullWhen(true)] out string? newName)
         {
             if (this.WideCharOnly && this.IsWideFunction(methodName))
@@ -1062,17 +1067,17 @@ namespace Win32.CodeGen
                 else
                 {
                     var fieldInfo = this.ReinterpretFieldType(fieldDeclarator.Identifier.ValueText, fieldDef.DecodeSignature(this.signatureTypeProvider, null), fieldDef.GetCustomAttributes());
-                    if (fieldInfo.Property is object)
+                    if (fieldInfo.AdditionalMembers.Count > 0)
                     {
                         fieldDeclarator = fieldDeclarator.WithIdentifier(Identifier(GetHiddenFieldName(fieldDeclarator.Identifier.ValueText)));
 
-                        members.Add(fieldInfo.Property);
+                        members.AddRange(fieldInfo.AdditionalMembers);
                     }
 
                     field = FieldDeclaration(VariableDeclaration(fieldInfo.FieldType).AddVariables(fieldDeclarator))
-                        .AddModifiers(Token(fieldInfo.Property is object ? SyntaxKind.PrivateKeyword : SyntaxKind.PublicKeyword));
+                        .AddModifiers(Token(fieldInfo.AdditionalMembers.Count > 0 ? SyntaxKind.PrivateKeyword : SyntaxKind.PublicKeyword));
 
-                    if (fieldInfo.Property is object)
+                    if (fieldInfo.AdditionalMembers.Count > 0)
                     {
                         field = field.AddAttributeLists(AttributeList().AddAttributes(DebuggerBrowsable(DebuggerBrowsableState.Never)));
                     }
@@ -1192,8 +1197,6 @@ namespace Win32.CodeGen
         private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration, string declaringTypeName)
         {
             static ParameterSyntax StripAttributes(ParameterSyntax parameter) => parameter.WithAttributeLists(List<AttributeListSyntax>());
-            static TypeSyntax MakeSpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("Span")).AddTypeArgumentListArguments(typeArgument));
-            static TypeSyntax MakeReadOnlySpanOfT(TypeSyntax typeArgument) => QualifiedName(IdentifierName("System"), GenericName(Identifier("ReadOnlySpan")).AddTypeArgumentListArguments(typeArgument));
 
             var parameters = externMethodDeclaration.ParameterList.Parameters.Select(StripAttributes).ToList();
             var arguments = externMethodDeclaration.ParameterList.Parameters.Select(p => Argument(IdentifierName(p.Identifier.Text))).ToList();
@@ -1545,8 +1548,13 @@ namespace Win32.CodeGen
             return (originalType, null);
         }
 
-        private (TypeSyntax FieldType, PropertyDeclarationSyntax? Property) ReinterpretFieldType(string fieldName, TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
+        private (TypeSyntax FieldType, SyntaxList<MemberDeclarationSyntax> AdditionalMembers) ReinterpretFieldType(string fieldName, TypeSyntax originalType, CustomAttributeHandleCollection customAttributes)
         {
+            ExpressionSyntax GetHiddenFieldAccess() => MemberAccessExpression(
+                SyntaxKind.SimpleMemberAccessExpression,
+                ThisExpression(),
+                IdentifierName(GetHiddenFieldName(fieldName)));
+
             // For fields, we don't want to use MarshalAs attributes because that turns our structs into managed types,
             // and thus cannot be used with pointers.
             foreach (CustomAttributeHandle attHandle in customAttributes)
@@ -1563,10 +1571,7 @@ namespace Win32.CodeGen
                             case UnmanagedType.Bool:
                                 // The native memory is 4 bytes long, so we can't use C# bool which is just 1 byte long.
                                 // Use int for the field, and generate a property accessor.
-                                ExpressionSyntax hiddenFieldAccess = MemberAccessExpression(
-                                    SyntaxKind.SimpleMemberAccessExpression,
-                                    ThisExpression(),
-                                    IdentifierName(GetHiddenFieldName(fieldName)));
+                                ExpressionSyntax hiddenFieldAccess = GetHiddenFieldAccess();
                                 var property = PropertyDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), fieldName)
                                     .AddModifiers(Token(SyntaxKind.PublicKeyword))
                                     .AddAccessorListAccessors(
@@ -1585,11 +1590,11 @@ namespace Win32.CodeGen
                                                     LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(1)),
                                                     LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(0))))))
                                             .WithSemicolonToken(Token(SyntaxKind.SemicolonToken)));
-                                return (originalType, property);
+                                return (originalType, SingletonList<MemberDeclarationSyntax>(property));
                             case UnmanagedType.LPWStr:
                                 if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.UShortKeyword } } })
                                 {
-                                    return (PointerType(PredefinedType(Token(SyntaxKind.CharKeyword))), null);
+                                    return (PointerType(PredefinedType(Token(SyntaxKind.CharKeyword))), default);
                                 }
 
                                 break;
@@ -1597,7 +1602,7 @@ namespace Win32.CodeGen
                             case UnmanagedType.LPStr:
                                 if (originalType is PointerTypeSyntax { ElementType: PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.SByteKeyword } } })
                                 {
-                                    return (PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword))), null);
+                                    return (PointerType(PredefinedType(Token(SyntaxKind.ByteKeyword))), default);
                                 }
 
                                 break;
@@ -1611,7 +1616,46 @@ namespace Win32.CodeGen
                 }
             }
 
-            return (originalType, null);
+            // If the field is a fixed length array, we have to work some code gen magic since C# does not allow those.
+            if (originalType is ArrayTypeSyntax arrayType && arrayType.RankSpecifiers.Count > 0)
+            {
+                int length = int.Parse(((LiteralExpressionSyntax)arrayType.RankSpecifiers[0].Sizes[0]).Token.ValueText);
+
+                // private struct __TheStruct_Count
+                // {
+                //     private TheStruct _1, _2, _3, _4, _5, _6, _7, _8;
+                // }
+
+                var fixedLengthStruct = StructDeclaration($"__{arrayType.ElementType}_{length}")
+                    .AddModifiers(Token(SyntaxKind.PrivateKeyword))
+                    .AddMembers(FieldDeclaration(VariableDeclaration(arrayType.ElementType)
+                        .AddVariables(Enumerable.Range(1, length).Select(n => VariableDeclarator($"_{n}")).ToArray()))
+                        .AddModifiers(Token(SyntaxKind.PrivateKeyword)));
+
+                // public unsafe Span<TheStruct> TheProperty {
+                //    get {
+                //       fixed (void* p = &__field)
+                //          return new Span<TheStruct>(p, count);
+                //    }
+                // }
+                ExpressionSyntax hiddenFieldAccess = GetHiddenFieldAccess();
+                var pointerName = IdentifierName("p");
+                var pointerDeclaration = VariableDeclaration(VoidStar).AddVariables(
+                    VariableDeclarator(pointerName.Identifier).WithInitializer(
+                        EqualsValueClause(PrefixUnaryExpression(SyntaxKind.AddressOfExpression, hiddenFieldAccess))));
+                var property = PropertyDeclaration(MakeSpanOfT(arrayType.ElementType), fieldName)
+                    .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword))
+                    .AddAccessorListAccessors(AccessorDeclaration(SyntaxKind.GetAccessorDeclaration).WithBody(
+                        Block(FixedStatement(
+                            pointerDeclaration,
+                            ReturnStatement(ObjectCreationExpression(MakeSpanOfT(arrayType.ElementType)).AddArgumentListArguments(
+                                Argument(pointerName),
+                                Argument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(length)))))))));
+
+                return (IdentifierName(fixedLengthStruct.Identifier.ValueText), List<MemberDeclarationSyntax>().Add(property).Add(fixedLengthStruct));
+            }
+
+            return (originalType, default);
         }
 
         private UnmanagedType? GetUnmanagedType(BlobHandle blobHandle)

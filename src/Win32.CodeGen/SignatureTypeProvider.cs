@@ -5,6 +5,7 @@ namespace Win32.CodeGen
 {
     using System;
     using System.Collections.Immutable;
+    using System.Linq;
     using System.Reflection.Metadata;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
@@ -77,7 +78,15 @@ namespace Win32.CodeGen
             return IdentifierName(name);
         }
 
-        public TypeSyntax GetArrayType(TypeSyntax elementType, ArrayShape shape) => throw new NotImplementedException();
+        public TypeSyntax GetArrayType(TypeSyntax elementType, ArrayShape shape)
+        {
+            if (shape.LowerBounds[0] > 0)
+            {
+                throw new NotSupportedException();
+            }
+
+            return ArrayType(elementType, SingletonList(ArrayRankSpecifier().AddSizes(shape.Sizes.Select(size => LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(size))).ToArray<ExpressionSyntax>())));
+        }
 
         public TypeSyntax GetByReferenceType(TypeSyntax elementType) => throw new NotImplementedException();
 
