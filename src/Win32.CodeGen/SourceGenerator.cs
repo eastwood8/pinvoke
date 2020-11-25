@@ -17,10 +17,10 @@ namespace Win32.CodeGen
     public class SourceGenerator : ISourceGenerator
     {
         private const string NativeMethodsAdditionalFileName = "NativeMethods.txt";
-        private static readonly DiagnosticDescriptor NoMatchingMethod = new DiagnosticDescriptor(
+        private static readonly DiagnosticDescriptor NoMatchingMethodOrType = new DiagnosticDescriptor(
             "PInvoke001",
-            "No matching method",
-            "Method \"{0}\" not found.",
+            "No matching method or type found",
+            "Method or type \"{0}\" not found.",
             "Functionality",
             DiagnosticSeverity.Error,
             isEnabledByDefault: true);
@@ -76,9 +76,9 @@ namespace Win32.CodeGen
                 }
                 else
                 {
-                    if (!generator.TryGenerateExternMethod(name))
+                    if (!generator.TryGenerateExternMethod(name) && !generator.TryGenerateType(name))
                     {
-                        context.ReportDiagnostic(Diagnostic.Create(NoMatchingMethod, location, name));
+                        context.ReportDiagnostic(Diagnostic.Create(NoMatchingMethodOrType, location, name));
                     }
                 }
             }

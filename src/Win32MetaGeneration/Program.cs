@@ -46,7 +46,10 @@ namespace Win32.CodeGen
                         }
                         else
                         {
-                            generator.TryGenerateExternMethod(name);
+                            if (!generator.TryGenerateExternMethod(name))
+                            {
+                                generator.TryGenerateType(name);
+                            }
                         }
                     }
                 }

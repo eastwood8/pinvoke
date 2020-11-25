@@ -66,6 +66,14 @@ namespace Win32.CodeGen
         {
             var tr = reader.GetTypeReference(handle);
             string name = reader.GetString(tr.Name);
+
+            // Take this opportunity to ensure the type exists too.
+            if (Generator.BclInteropStructs.TryGetValue(name, out TypeSyntax? bclType))
+            {
+                return bclType;
+            }
+
+            this.owner.GenerateInteropType(handle);
             return IdentifierName(name);
         }
 

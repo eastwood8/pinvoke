@@ -196,6 +196,8 @@ namespace Win32.CodeGen
 
         private readonly Dictionary<string, MethodDefinitionHandle> methodsByName;
 
+        private readonly Dictionary<string, TypeDefinitionHandle> typesByName;
+
         private readonly Dictionary<string, TypeSyntax?> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax?>();
 
         public Generator()
@@ -215,7 +217,27 @@ namespace Win32.CodeGen
 
             this.Apis = this.mr.TypeDefinitions.Select(this.mr.GetTypeDefinition).Single(td => this.mr.StringComparer.Equals(td.Name, "Apis") && this.mr.StringComparer.Equals(td.Namespace, MicrosoftWindowsSdk));
             this.InitializeNestedToDeclaringLookupDictionary();
-            this.methodsByName = this.Apis.GetMethods().ToDictionary(h => this.mr.GetString(this.mr.GetMethodDefinition(h).Name), StringComparer.Ordinal);
+
+            this.methodsByName = new Dictionary<string, MethodDefinitionHandle>(StringComparer.Ordinal);
+            foreach (MethodDefinitionHandle methodDefHandle in this.Apis.GetMethods())
+            {
+                string methodName = this.mr.GetString(this.mr.GetMethodDefinition(methodDefHandle).Name);
+                if (!this.methodsByName.ContainsKey(methodName))
+                {
+                    this.methodsByName.Add(methodName, methodDefHandle);
+                }
+            }
+
+            this.typesByName = new Dictionary<string, TypeDefinitionHandle>(StringComparer.Ordinal);
+            foreach (TypeDefinitionHandle typeDefinitionHandle in this.mr.TypeDefinitions)
+            {
+                TypeDefinition typeDefinition = this.mr.GetTypeDefinition(typeDefinitionHandle);
+                string name = this.mr.GetString(typeDefinition.Name);
+                if (!this.typesByName.ContainsKey(name))
+                {
+                    this.typesByName.Add(name, typeDefinitionHandle);
+                }
+            }
         }
 
         public CompilationUnitSyntax CompilationUnit
@@ -347,6 +369,17 @@ namespace Win32.CodeGen
             return successful;
         }
 
+        public bool TryGenerateType(string name)
+        {
+            if (this.typesByName.TryGetValue(name, out TypeDefinitionHandle typeDefHandle))
+            {
+                this.GenerateInteropType(typeDefHandle);
+                return true;
+            }
+
+            return false;
+        }
+
         internal void GenerateAllInteropTypes(CancellationToken cancellationToken)
         {
             foreach (TypeDefinitionHandle typeDefinitionHandle in this.mr.TypeDefinitions)
@@ -460,6 +493,21 @@ namespace Win32.CodeGen
                         break;
                     }
                 }
+            }
+        }
+
+        internal void GenerateInteropType(TypeReferenceHandle typeRefHandle)
+        {
+            TypeReference typeRef = this.mr.GetTypeReference(typeRefHandle);
+            string name = this.mr.GetString(typeRef.Name);
+            if (this.typesByName.TryGetValue(name, out TypeDefinitionHandle typeDefHandle))
+            {
+                this.GenerateInteropType(typeDefHandle);
+            }
+            else
+            {
+                // System.Guid reaches here, but doesn't need to be generated.
+                ////throw new NotSupportedException($"Could not find a type def for: {this.mr.GetString(typeRef.Namespace)}.{name}");
             }
         }
 
