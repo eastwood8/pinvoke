@@ -946,73 +946,87 @@ namespace Win32.CodeGen
                 return null;
             }
 
-            StringHandle baseTypeName, baseTypeNamespace;
-            if (typeDef.BaseType.IsNil)
+            try
             {
-                baseTypeName = default;
-                baseTypeNamespace = default;
-            }
-            else
-            {
-                switch (typeDef.BaseType.Kind)
+                StringHandle baseTypeName, baseTypeNamespace;
+                if (typeDef.BaseType.IsNil)
                 {
-                    case HandleKind.TypeReference:
-                        TypeReference baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
-                        baseTypeName = baseTypeRef.Name;
-                        baseTypeNamespace = baseTypeRef.Namespace;
-                        break;
-                    case HandleKind.TypeDefinition:
-                        TypeDefinition baseTypeDef = this.mr.GetTypeDefinition((TypeDefinitionHandle)typeDef.BaseType);
-                        baseTypeName = baseTypeDef.Name;
-                        baseTypeNamespace = baseTypeDef.Namespace;
-                        break;
-                    default:
-                        throw new NotSupportedException("Unsupported base type handle: " + typeDef.BaseType.Kind);
+                    baseTypeName = default;
+                    baseTypeNamespace = default;
                 }
-            }
-
-            MemberDeclarationSyntax? typeDeclaration;
-
-            if ((typeDef.Attributes & TypeAttributes.Interface) == TypeAttributes.Interface)
-            {
-                typeDeclaration = this.CreateInterface(typeDef);
-            }
-            else if (this.mr.StringComparer.Equals(baseTypeName, nameof(ValueType)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
-            {
-                StructDeclarationSyntax structDeclaration = this.CreateInteropStruct(typeDef);
-
-                // Proactively generate all nested types as well.
-                foreach (TypeDefinitionHandle nestedHandle in typeDef.GetNestedTypes())
+                else
                 {
-                    if (this.CreateInteropType(nestedHandle) is { } nestedType)
+                    switch (typeDef.BaseType.Kind)
                     {
-                        structDeclaration = structDeclaration.AddMembers(nestedType);
+                        case HandleKind.TypeReference:
+                            TypeReference baseTypeRef = this.mr.GetTypeReference((TypeReferenceHandle)typeDef.BaseType);
+                            baseTypeName = baseTypeRef.Name;
+                            baseTypeNamespace = baseTypeRef.Namespace;
+                            break;
+                        case HandleKind.TypeDefinition:
+                            TypeDefinition baseTypeDef = this.mr.GetTypeDefinition((TypeDefinitionHandle)typeDef.BaseType);
+                            baseTypeName = baseTypeDef.Name;
+                            baseTypeNamespace = baseTypeDef.Namespace;
+                            break;
+                        default:
+                            throw new NotSupportedException("Unsupported base type handle: " + typeDef.BaseType.Kind);
                     }
                 }
 
-                typeDeclaration = structDeclaration;
-            }
-            else if (this.mr.StringComparer.Equals(baseTypeName, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
-            {
-                // TODO: reuse .NET types like FileAccess
-                typeDeclaration = this.CreateInteropEnum(typeDef);
-            }
-            else if (this.mr.StringComparer.Equals(baseTypeName, nameof(MulticastDelegate)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
-            {
-                typeDeclaration = this.CreateInteropDelegate(typeDef);
-            }
-            else
-            {
-                // not yet supported.
-                return null;
-            }
+                MemberDeclarationSyntax? typeDeclaration;
 
-            return typeDeclaration;
+                if ((typeDef.Attributes & TypeAttributes.Interface) == TypeAttributes.Interface)
+                {
+                    typeDeclaration = this.CreateInterface(typeDef);
+                }
+                else if (this.mr.StringComparer.Equals(baseTypeName, nameof(ValueType)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
+                {
+                    StructDeclarationSyntax structDeclaration = this.CreateInteropStruct(typeDef);
+
+                    // Proactively generate all nested types as well.
+                    foreach (TypeDefinitionHandle nestedHandle in typeDef.GetNestedTypes())
+                    {
+                        if (this.CreateInteropType(nestedHandle) is { } nestedType)
+                        {
+                            structDeclaration = structDeclaration.AddMembers(nestedType);
+                        }
+                    }
+
+                    typeDeclaration = structDeclaration;
+                }
+                else if (this.mr.StringComparer.Equals(baseTypeName, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
+                {
+                    // TODO: reuse .NET types like FileAccess
+                    typeDeclaration = this.CreateInteropEnum(typeDef);
+                }
+                else if (this.mr.StringComparer.Equals(baseTypeName, nameof(MulticastDelegate)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
+                {
+                    typeDeclaration = this.CreateInteropDelegate(typeDef);
+                }
+                else
+                {
+                    // not yet supported.
+                    return null;
+                }
+
+                return typeDeclaration;
+            }
+            catch (Exception ex)
+            {
+                throw new Exception("Failed to generate " + this.mr.GetString(typeDef.Name), ex);
+            }
         }
 
         private MemberDeclarationSyntax? CreateInterface(TypeDefinition typeDef)
         {
             string ifaceName = this.mr.GetString(typeDef.Name);
+
+            // Generating the interface may be easy enough,
+            // but since interfaces are used as fields in structs,
+            // it makes these structs "managed" types and therefore non-blittable,
+            // which is a transitive trait that breaks a lot of our code gen.
+            // For now, just report that we don't support them.
+            throw new NotSupportedException($"Type {ifaceName} is an interface, which is not yet supported.");
 
             ComInterfaceType? interfaceType = null;
             Guid guid = Guid.Empty;
