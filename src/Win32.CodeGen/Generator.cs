@@ -1017,6 +1017,7 @@ namespace Win32.CodeGen
             ComInterfaceType? interfaceType = null;
             Guid guid = Guid.Empty;
             TypeSyntax? baseType = null;
+            int baseTypeMemberCount = 0;
             foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
             {
                 var att = this.mr.GetCustomAttribute(attHandle);
@@ -1036,13 +1037,17 @@ namespace Win32.CodeGen
                     var baseTypeName = (string)args.FixedArguments[0].Value!;
                     if (baseTypeName != "IUnknown")
                     {
-                        this.GenerateInteropType(this.typesByName[baseTypeName]);
+                        TypeDefinitionHandle baseTypeDefHandle = this.typesByName[baseTypeName];
+                        this.GenerateInteropType(baseTypeDefHandle);
                         baseType = IdentifierName(baseTypeName);
+                        TypeDefinition baseTypeDef = this.mr.GetTypeDefinition(baseTypeDefHandle);
+                        baseTypeMemberCount = baseTypeDef.GetMethods().Count;
                     }
                 }
             }
 
             var members = new List<MemberDeclarationSyntax>();
+            int membersGenerated = 0;
             foreach (MethodDefinitionHandle methodDefHandle in typeDef.GetMethods())
             {
                 var methodDefinition = this.mr.GetMethodDefinition(methodDefHandle);
@@ -1073,6 +1078,13 @@ namespace Win32.CodeGen
                 {
                     methodDeclaration = methodDeclaration.AddAttributeLists(
                         AttributeList().WithTarget(AttributeTargetSpecifier(Token(SyntaxKind.ReturnKeyword))).AddAttributes(returnTypeAttribute));
+                }
+
+                // C# COM interfaces may derive from others, but they must always redefine
+                // all the base type's members first (very oddly). So add "new" modifier so C# doesn't complain about it.
+                if (membersGenerated++ < baseTypeMemberCount)
+                {
+                    methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.NewKeyword));
                 }
 
                 if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
