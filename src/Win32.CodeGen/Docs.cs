@@ -27,7 +27,8 @@ namespace Win32.CodeGen
             using Stream? docsYamlStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Win32.CodeGen.apidocs.yml");
             if (docsYamlStream is null)
             {
-                throw new Exception("Metadata assembly not found.");
+                ////return new Docs(new Dictionary<string, ApiDetails>());
+                throw new Exception("YAML documentation not found.");
             }
 
             using var yamlTextReader = new StreamReader(docsYamlStream);
