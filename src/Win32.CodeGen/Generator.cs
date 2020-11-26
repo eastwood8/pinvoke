@@ -29,6 +29,7 @@ namespace Win32.CodeGen
         {
             { nameof(System.Runtime.InteropServices.ComTypes.FILETIME), ParseTypeName("System.Runtime.InteropServices.ComTypes.FILETIME") },
             { "IUnknown", PredefinedType(Token(SyntaxKind.ObjectKeyword)) },
+            { "IDispatch", PredefinedType(Token(SyntaxKind.ObjectKeyword)) },
         };
 
         private const string SystemRuntimeCompilerServices = "System.Runtime.CompilerServices";
