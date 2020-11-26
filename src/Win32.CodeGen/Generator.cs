@@ -609,9 +609,9 @@ namespace Win32.CodeGen
 
         private static AttributeSyntax FieldOffset(int offset) => FieldOffsetAttributeSyntax.AddArgumentListArguments(AttributeArgument(LiteralExpression(SyntaxKind.NumericLiteralExpression, Literal(offset))));
 
-        private static AttributeSyntax StructLayout(TypeDefinition typeDef, TypeLayout layout)
+        private static AttributeSyntax StructLayout(TypeAttributes typeAttributes, TypeLayout layout)
         {
-            LayoutKind layoutKind = (typeDef.Attributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout ? LayoutKind.Explicit : LayoutKind.Sequential;
+            LayoutKind layoutKind = (typeAttributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout ? LayoutKind.Explicit : LayoutKind.Sequential;
             var structLayoutAttribute = Attribute(IdentifierName("StructLayout")).AddArgumentListArguments(
                 AttributeArgument(MemberAccessExpression(
                     SyntaxKind.SimpleMemberAccessExpression,
@@ -1275,7 +1275,7 @@ namespace Win32.CodeGen
             TypeLayout layout = typeDef.GetLayout();
             if (!layout.IsDefault || (typeDef.Attributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout)
             {
-                result = result.AddAttributeLists(AttributeList().AddAttributes(StructLayout(typeDef, layout)));
+                result = result.AddAttributeLists(AttributeList().AddAttributes(StructLayout(typeDef.Attributes, layout)));
             }
 
             Guid guid = Guid.Empty;
@@ -1804,8 +1804,9 @@ namespace Win32.CodeGen
                 // {
                 //     private TheStruct _1, _2, _3, _4, _5, _6, _7, _8;
                 // }
-                var fixedLengthStruct = StructDeclaration($"__{arrayType.ElementType}_{length}")
+                var fixedLengthStruct = StructDeclaration($"__{fieldName}_{length}")
                     .AddModifiers(Token(SyntaxKind.PrivateKeyword))
+                    .AddAttributeLists(AttributeList().AddAttributes(StructLayout(TypeAttributes.SequentialLayout, new TypeLayout(0, packingSize: 1))))
                     .AddMembers(FieldDeclaration(VariableDeclaration(arrayType.ElementType)
                         .AddVariables(Enumerable.Range(1, length).Select(n => VariableDeclarator($"_{n}")).ToArray()))
                         .AddModifiers(Token(SyntaxKind.PrivateKeyword)));
