@@ -1015,6 +1015,7 @@ namespace Win32.CodeGen
 
             ComInterfaceType? interfaceType = null;
             Guid guid = Guid.Empty;
+            TypeSyntax? baseType = null;
             foreach (CustomAttributeHandle attHandle in typeDef.GetCustomAttributes())
             {
                 var att = this.mr.GetCustomAttribute(attHandle);
@@ -1027,6 +1028,16 @@ namespace Win32.CodeGen
                 {
                     var args = att.DecodeValue(this.customAttributeTypeProvider);
                     guid = Guid.Parse((string)args.FixedArguments[0].Value!);
+                }
+                else if (this.IsAttribute(att, InteropDecorationNamespace, "NativeInheritanceAttribute"))
+                {
+                    var args = att.DecodeValue(this.customAttributeTypeProvider);
+                    var baseTypeName = (string)args.FixedArguments[0].Value!;
+                    if (baseTypeName != "IUnknown")
+                    {
+                        this.GenerateInteropType(this.typesByName[baseTypeName]);
+                        baseType = IdentifierName(baseTypeName);
+                    }
                 }
             }
 
@@ -1089,6 +1100,11 @@ namespace Win32.CodeGen
             if (interfaceType is object)
             {
                 iface = iface.AddAttributeLists().AddAttributeLists(AttributeList().AddAttributes(InterfaceType(interfaceType.Value)));
+            }
+
+            if (baseType is object)
+            {
+                iface = iface.AddBaseListTypes(SimpleBaseType(baseType));
             }
 
             return iface;
