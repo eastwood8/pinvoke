@@ -577,6 +577,27 @@ namespace Win32.CodeGen
                     }
                 }
 
+                if (docs.Fields is object && memberDeclaration is StructDeclarationSyntax structDeclaration)
+                {
+                    var fieldsDocBuilder = new StringBuilder();
+                    memberDeclaration = memberDeclaration.ReplaceNodes(
+                        structDeclaration.Members.OfType<FieldDeclarationSyntax>(),
+                        (_, field) =>
+                        {
+                            var variable = field.Declaration.Variables.Single();
+                            if (docs.Fields.TryGetValue(variable.Identifier.ValueText, out string? fieldDoc))
+                            {
+                                fieldsDocBuilder.Append($@"/// <summary>");
+                                EmitDoc(fieldDoc, fieldsDocBuilder, docs, "members");
+                                fieldsDocBuilder.AppendLine("</summary>");
+                                field = field.WithLeadingTrivia(ParseLeadingTrivia(fieldsDocBuilder.ToString()));
+                                fieldsDocBuilder.Clear();
+                            }
+
+                            return field;
+                        });
+                }
+
                 if (docs.ReturnValue is object)
                 {
                     docCommentsBuilder.Append("/// <returns>");
@@ -593,16 +614,16 @@ namespace Win32.CodeGen
 
             return memberDeclaration;
 
-            static void EmitDoc(string paramDoc, StringBuilder docCommentsBuilder, Docs.ApiDetails docs, string docsAnchor)
+            static void EmitDoc(string yamlDocSrc, StringBuilder docCommentsBuilder, Docs.ApiDetails docs, string docsAnchor)
             {
                 // TODO: refine docs by
                 // * replacing relative hyperlinks with absolute ones and translate tags.
                 // * replace certain HTML tags with xml doc comment equivalents and bypass escaping.
                 // * include more than just the first line; perhaps at least the first complete sentence.
-                if (paramDoc.Contains('\n'))
+                if (yamlDocSrc.Contains('\n'))
                 {
                     docCommentsBuilder.AppendLine();
-                    var docReader = new StringReader(paramDoc);
+                    var docReader = new StringReader(yamlDocSrc);
                     string? paramDocLine;
 
                     while ((paramDocLine = docReader.ReadLine()) is object)
@@ -617,7 +638,7 @@ namespace Win32.CodeGen
                 }
                 else
                 {
-                    docCommentsBuilder.Append(new XText(paramDoc).ToString());
+                    docCommentsBuilder.Append(new XText(yamlDocSrc).ToString());
                 }
             }
         }
@@ -764,6 +785,12 @@ namespace Win32.CodeGen
 
                 // What we're looking for would always be the first element in the collection.
                 break;
+            }
+
+            // Due to https://github.com/microsoft/win32metadata/issues/45, we have to look on the method itself as well.
+            if (returnTypeAttributes is null)
+            {
+                return methodDefinition.GetCustomAttributes();
             }
 
             return returnTypeAttributes;

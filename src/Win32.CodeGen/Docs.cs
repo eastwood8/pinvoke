@@ -46,6 +46,8 @@ namespace Win32.CodeGen
 
             public Dictionary<string, string>? Parameters { get; set; }
 
+            public Dictionary<string, string>? Fields { get; set; }
+
             public string? ReturnValue { get; set; }
         }
     }

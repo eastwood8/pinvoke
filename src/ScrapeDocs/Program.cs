@@ -18,6 +18,7 @@ namespace ScrapeDocs
     {
         private static readonly Regex FileNamePattern = new Regex(@"^\w\w-\w+-([\w\-]+)$", RegexOptions.Compiled);
         private static readonly Regex ParameterHeaderPattern = new Regex(@"^### -param (\w+)", RegexOptions.Compiled);
+        private static readonly Regex FieldHeaderPattern = new Regex(@"^### -field (\w+)", RegexOptions.Compiled);
         private static readonly Regex ReturnHeaderPattern = new Regex(@"^## -returns", RegexOptions.Compiled);
         private readonly string contentBasePath;
         private readonly string outputPath;
@@ -71,7 +72,7 @@ namespace ScrapeDocs
         {
             Console.WriteLine("Enumerating documents to be parsed...");
             string[] paths = Directory.GetFiles(this.contentBasePath, "??-*-*.md", SearchOption.AllDirectories)
-                ////.Where(p => Path.GetFileNameWithoutExtension(p).Contains("createfilew")).ToArray()
+                ////.Where(p => Path.GetFileNameWithoutExtension(p).Contains("lastinputinfo")).ToArray()
                 ;
 
             Console.WriteLine("Parsing documents...");
@@ -142,35 +143,45 @@ namespace ScrapeDocs
                 methodNode.Add("Description", description);
             }
 
-            // Search for parameter docs
+            // Search for parameter/field docs
             var parametersMap = new YamlMappingNode();
-            var docBuilder = new StringBuilder();
+            var fieldsMap = new YamlMappingNode();
+            StringBuilder docBuilder = new StringBuilder();
             line = mdFileReader.ReadLine();
+
+            void ParseSection(Match match, YamlMappingNode receivingMap)
+            {
+                string sectionName = match.Groups[1].Value;
+                while ((line = mdFileReader.ReadLine()) is object)
+                {
+                    if (line.StartsWith('#'))
+                    {
+                        break;
+                    }
+
+                    docBuilder.AppendLine(line);
+                }
+
+                try
+                {
+                    receivingMap.Add(sectionName, docBuilder.ToString().Trim());
+                }
+                catch (ArgumentException)
+                {
+                }
+
+                docBuilder.Clear();
+            }
+
             while (line is object)
             {
-                Match m = ParameterHeaderPattern.Match(line);
-                if (m.Success)
+                if (ParameterHeaderPattern.Match(line) is Match { Success: true } parameterMatch)
                 {
-                    string parameterName = m.Groups[1].Value;
-                    while ((line = mdFileReader.ReadLine()) is object)
-                    {
-                        if (line.StartsWith('#'))
-                        {
-                            break;
-                        }
-
-                        docBuilder.AppendLine(line);
-                    }
-
-                    try
-                    {
-                        parametersMap.Add(parameterName, docBuilder.ToString().Trim());
-                    }
-                    catch (ArgumentException)
-                    {
-                    }
-
-                    docBuilder.Clear();
+                    ParseSection(parameterMatch, parametersMap);
+                }
+                else if (FieldHeaderPattern.Match(line) is Match { Success: true } fieldMatch)
+                {
+                    ParseSection(fieldMatch, fieldsMap);
                 }
                 else
                 {
@@ -186,6 +197,11 @@ namespace ScrapeDocs
             if (parametersMap.Any())
             {
                 methodNode.Add("Parameters", parametersMap);
+            }
+
+            if (fieldsMap.Any())
+            {
+                methodNode.Add("Fields", fieldsMap);
             }
 
             // Search for return value documentation
