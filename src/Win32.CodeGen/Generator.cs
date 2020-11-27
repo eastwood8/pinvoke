@@ -626,14 +626,58 @@ namespace Win32.CodeGen
                     var docReader = new StringReader(yamlDocSrc);
                     string? paramDocLine;
 
+                    bool inParagraph = false;
+                    bool inComment = false;
+                    int blankLineCounter = 0;
                     while ((paramDocLine = docReader.ReadLine()) is object)
                     {
-                        docCommentsBuilder.Append("/// ");
-                        docCommentsBuilder.AppendLine(new XText(paramDocLine).ToString());
-                        break; // just read the first line for now till we can clean up what can come later.
+                        if (string.IsNullOrWhiteSpace(paramDocLine))
+                        {
+                            if (++blankLineCounter >= 2 && inParagraph)
+                            {
+                                docCommentsBuilder.AppendLine("</para>");
+                                inParagraph = false;
+                                inComment = false;
+                            }
+
+                            continue;
+                        }
+                        else if (blankLineCounter > 0)
+                        {
+                            blankLineCounter = 0;
+                        }
+                        else
+                        {
+                            docCommentsBuilder.Append(' ');
+                        }
+
+                        if (!inParagraph)
+                        {
+                            docCommentsBuilder.Append("/// <para>");
+                            inParagraph = true;
+                            inComment = true;
+                        }
+
+                        if (!inComment)
+                        {
+                            docCommentsBuilder.Append("/// ");
+                        }
+
+                        docCommentsBuilder.Append(paramDocLine);
                     }
 
-                    docCommentsBuilder.AppendLine($@"/// <para>This doc was truncated. <see href=""{docs.HelpLink}#{docsAnchor}"">Read the rest on docs.microsoft.com</see>.</para>");
+                    if (inParagraph)
+                    {
+                        if (!inComment)
+                        {
+                            docCommentsBuilder.Append("/// ");
+                        }
+
+                        docCommentsBuilder.AppendLine("</para>");
+                        inParagraph = false;
+                    }
+
+                    docCommentsBuilder.AppendLine($@"/// <para><see href=""{docs.HelpLink}#{docsAnchor}"">Read more on docs.microsoft.com</see>.</para>");
                     docCommentsBuilder.Append("/// ");
                 }
                 else
