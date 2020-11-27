@@ -601,20 +601,31 @@ namespace Win32.CodeGen
                 if (docs.ReturnValue is object)
                 {
                     docCommentsBuilder.Append("/// <returns>");
-                    EmitDoc(docs.ReturnValue, docCommentsBuilder, docs, "return-value");
+                    EmitDoc(docs.ReturnValue, docCommentsBuilder, docs: null, string.Empty);
                     docCommentsBuilder.AppendLine("</returns>");
                 }
 
-                docCommentsBuilder.AppendLine($@"/// <remarks>
-/// <see href=""{docs.HelpLink}"">Learn more about this API from docs.microsoft.com</see>.
-/// </remarks>");
+                docCommentsBuilder.Append($"/// <remarks>");
+                if (docs.Remarks is object)
+                {
+                    EmitDoc(docs.Remarks, docCommentsBuilder, docs, string.Empty);
+                }
+                else
+                {
+                    docCommentsBuilder.AppendLine();
+                    docCommentsBuilder.AppendLine($@"/// <para><see href=""{docs.HelpLink}"">Learn more about this API from docs.microsoft.com</see>.</para>");
+                    docCommentsBuilder.Append("///");
+                }
+
+                docCommentsBuilder.AppendLine($"</remarks>");
+
                 memberDeclaration = memberDeclaration.WithLeadingTrivia(
                     ParseLeadingTrivia(docCommentsBuilder.ToString()));
             }
 
             return memberDeclaration;
 
-            static void EmitDoc(string yamlDocSrc, StringBuilder docCommentsBuilder, Docs.ApiDetails docs, string docsAnchor)
+            static void EmitDoc(string yamlDocSrc, StringBuilder docCommentsBuilder, Docs.ApiDetails? docs, string docsAnchor)
             {
                 // TODO: refine docs by
                 // * replacing relative hyperlinks with absolute ones and translate tags.
@@ -677,7 +688,11 @@ namespace Win32.CodeGen
                         inParagraph = false;
                     }
 
-                    docCommentsBuilder.AppendLine($@"/// <para><see href=""{docs.HelpLink}#{docsAnchor}"">Read more on docs.microsoft.com</see>.</para>");
+                    if (docs is object)
+                    {
+                        docCommentsBuilder.AppendLine($@"/// <para><see href=""{docs.HelpLink}#{docsAnchor}"">Read more on docs.microsoft.com</see>.</para>");
+                    }
+
                     docCommentsBuilder.Append("/// ");
                 }
                 else

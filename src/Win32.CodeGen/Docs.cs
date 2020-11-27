@@ -44,6 +44,8 @@ namespace Win32.CodeGen
 
             public string? Description { get; set; }
 
+            public string? Remarks { get; set; }
+
             public Dictionary<string, string>? Parameters { get; set; }
 
             public Dictionary<string, string>? Fields { get; set; }

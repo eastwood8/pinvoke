@@ -20,6 +20,7 @@ namespace ScrapeDocs
         private static readonly Regex ParameterHeaderPattern = new Regex(@"^### -param (\w+)", RegexOptions.Compiled);
         private static readonly Regex FieldHeaderPattern = new Regex(@"^### -field (\w+)", RegexOptions.Compiled);
         private static readonly Regex ReturnHeaderPattern = new Regex(@"^## -returns", RegexOptions.Compiled);
+        private static readonly Regex RemarksHeaderPattern = new Regex(@"^## -remarks", RegexOptions.Compiled);
         private readonly string contentBasePath;
         private readonly string outputPath;
 
@@ -146,8 +147,26 @@ namespace ScrapeDocs
             // Search for parameter/field docs
             var parametersMap = new YamlMappingNode();
             var fieldsMap = new YamlMappingNode();
+            YamlScalarNode? remarksNode = null;
             StringBuilder docBuilder = new StringBuilder();
             line = mdFileReader.ReadLine();
+
+            void ParseTextSection(Match match, out YamlScalarNode node)
+            {
+                while ((line = mdFileReader.ReadLine()) is object)
+                {
+                    if (line.StartsWith('#'))
+                    {
+                        break;
+                    }
+
+                    docBuilder.AppendLine(line);
+                }
+
+                node = new YamlScalarNode(docBuilder.ToString());
+
+                docBuilder.Clear();
+            }
 
             void ParseSection(Match match, YamlMappingNode receivingMap)
             {
@@ -183,6 +202,10 @@ namespace ScrapeDocs
                 {
                     ParseSection(fieldMatch, fieldsMap);
                 }
+                else if (RemarksHeaderPattern.Match(line) is Match { Success: true } remarksMatch)
+                {
+                    ParseTextSection(remarksMatch, out remarksNode);
+                }
                 else
                 {
                     if (line is object && ReturnHeaderPattern.IsMatch(line))
@@ -202,6 +225,11 @@ namespace ScrapeDocs
             if (fieldsMap.Any())
             {
                 methodNode.Add("Fields", fieldsMap);
+            }
+
+            if (remarksNode is object)
+            {
+                methodNode.Add("Remarks", remarksNode);
             }
 
             // Search for return value documentation
