@@ -506,18 +506,20 @@ namespace Win32.CodeGen
             }
         }
 
-        internal void GenerateInteropType(TypeReferenceHandle typeRefHandle)
+        internal TypeDefinitionHandle? GenerateInteropType(TypeReferenceHandle typeRefHandle)
         {
             TypeReference typeRef = this.mr.GetTypeReference(typeRefHandle);
             string name = this.mr.GetString(typeRef.Name);
             if (this.typesByName.TryGetValue(name, out TypeDefinitionHandle typeDefHandle))
             {
                 this.GenerateInteropType(typeDefHandle);
+                return typeDefHandle;
             }
             else
             {
                 // System.Guid reaches here, but doesn't need to be generated.
                 ////throw new NotSupportedException($"Could not find a type def for: {this.mr.GetString(typeRef.Namespace)}.{name}");
+                return null;
             }
         }
 
@@ -1431,6 +1433,7 @@ namespace Win32.CodeGen
         private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration, string declaringTypeName, bool isStatic)
         {
             static ParameterSyntax StripAttributes(ParameterSyntax parameter) => parameter.WithAttributeLists(List<AttributeListSyntax>());
+            bool IsInterface(string name) => this.typesByName.TryGetValue(name, out TypeDefinitionHandle tdh) && (this.mr.GetTypeDefinition(tdh).Attributes & TypeAttributes.Interface) == TypeAttributes.Interface;
 
             var parameters = externMethodDeclaration.ParameterList.Parameters.Select(StripAttributes).ToList();
             var arguments = externMethodDeclaration.ParameterList.Parameters.Select(p => Argument(IdentifierName(p.Identifier.Text))).ToList();
@@ -1447,11 +1450,10 @@ namespace Win32.CodeGen
 
                 // TODO:
                 // * Review double/triple pointer scenarios.
-                // * Review pointers to COM pointer scenarios.
-                // * Add nullable annotations on COM interfaces that are annotated as optional.
                 // * Create an overload with fewer parameters when one parameter describes the length of another.
                 if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType
-                    && !IsVoid(ptrType.ElementType))
+                    && !IsVoid(ptrType.ElementType)
+                    && !(ptrType.ElementType is IdentifierNameSyntax id && IsInterface(id.Identifier.ValueText)))
                 {
                     bool isPointerToPointer = ptrType.ElementType is PointerTypeSyntax;
                     bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
