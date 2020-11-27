@@ -481,7 +481,7 @@ namespace Win32.CodeGen
             if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
             {
                 methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
-                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration, this.GroupByModule ? GetClassNameForModule(moduleName) : this.SingleClassName));
+                methodsList.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration, this.GroupByModule ? GetClassNameForModule(moduleName) : this.SingleClassName, isStatic: true));
             }
 
             methodsList.Add(methodDeclaration);
@@ -1177,8 +1177,11 @@ namespace Win32.CodeGen
                 // Add documentation if we can find it.
                 methodDeclaration = AddApiDocumentation($"{ifaceName}::{methodName}", methodDeclaration);
 
-                // TODO: generate friendly overloads as extension methods.
-                //// Code here
+                if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
+                {
+                    methodDeclaration = methodDeclaration.AddModifiers(Token(SyntaxKind.UnsafeKeyword));
+                    members.AddRange(this.CreateFriendlyOverloads(methodDefinition, methodDeclaration, ifaceName.Identifier.ValueText, isStatic: false));
+                }
 
                 members.Add(methodDeclaration);
             }
@@ -1425,7 +1428,7 @@ namespace Win32.CodeGen
             return result;
         }
 
-        private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration, string declaringTypeName)
+        private IEnumerable<MethodDeclarationSyntax> CreateFriendlyOverloads(MethodDefinition methodDefinition, MethodDeclarationSyntax externMethodDeclaration, string declaringTypeName, bool isStatic)
         {
             static ParameterSyntax StripAttributes(ParameterSyntax parameter) => parameter.WithAttributeLists(List<AttributeListSyntax>());
 
@@ -1606,7 +1609,10 @@ namespace Win32.CodeGen
                         XmlText("/// "),
                         XmlEmptyElement("inheritdoc").AddAttributes(XmlCrefAttribute(NameMemberCref(IdentifierName(externMethodDeclaration.Identifier), ToCref(externMethodDeclaration.ParameterList)))),
                         XmlText().AddTextTokens(XmlTextNewLine(TriviaList(), "\r\n", "\r\n", TriviaList()))));
-                InvocationExpressionSyntax externInvocation = InvocationExpression(QualifiedName(IdentifierName(declaringTypeName), IdentifierName(externMethodDeclaration.Identifier.Text)))
+                InvocationExpressionSyntax externInvocation = InvocationExpression(
+                    isStatic
+                        ? QualifiedName(IdentifierName(declaringTypeName), IdentifierName(externMethodDeclaration.Identifier.Text))
+                        : MemberAccessExpression(SyntaxKind.SimpleMemberAccessExpression, ThisExpression(), IdentifierName(externMethodDeclaration.Identifier.Text)))
                     .AddArgumentListArguments(arguments.ToArray());
                 bool hasVoidReturn = externMethodDeclaration.ReturnType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.VoidKeyword } };
                 var body = Block()
@@ -1618,8 +1624,14 @@ namespace Win32.CodeGen
                     body = Block(FixedStatement(fixedExpression, body));
                 }
 
+                var modifiers = TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword));
+                if (isStatic)
+                {
+                    modifiers = modifiers.Insert(1, Token(SyntaxKind.StaticKeyword));
+                }
+
                 MethodDeclarationSyntax friendlyDeclaration = externMethodDeclaration
-                    .WithModifiers(TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.UnsafeKeyword)))
+                    .WithModifiers(modifiers)
                     .WithAttributeLists(List<AttributeListSyntax>())
                     .WithParameterList(ParameterList().AddParameters(parameters.ToArray()))
                     .WithLeadingTrivia(leadingTrivia)
