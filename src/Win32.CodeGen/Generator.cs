@@ -1000,6 +1000,7 @@ namespace Win32.CodeGen
 
             // public SafeHandle() : base(INVALID_HANDLE_VALUE, true)
             members.Add(ConstructorDeclaration(safeHandleClassName)
+                .AddModifiers(Token(this.Visibility))
                 .WithInitializer(ConstructorInitializer(SyntaxKind.BaseConstructorInitializer, ArgumentList().AddArguments(
                     Argument(IdentifierName(invalidValueFieldName)),
                     Argument(LiteralExpression(SyntaxKind.TrueLiteralExpression)))))
@@ -1009,6 +1010,7 @@ namespace Win32.CodeGen
             const string preexistingHandleName = "preexistingHandle";
             const string ownsHandleName = "ownsHandle";
             members.Add(ConstructorDeclaration(safeHandleClassName)
+                .AddModifiers(Token(this.Visibility))
                 .AddParameterListParameters(
                     Parameter(Identifier(preexistingHandleName)).WithType(IntPtrTypeSyntax),
                     Parameter(Identifier(ownsHandleName)).WithType(PredefinedType(Token(SyntaxKind.BoolKeyword)))
