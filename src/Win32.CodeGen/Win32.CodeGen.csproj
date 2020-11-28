@@ -23,7 +23,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="$(PkgMicrosoft_Windows_SDK_Win32Metadata)\content\Win32MetadataLib.dll" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Windows_SDK_Win32Metadata)\content\Microsoft.Windows.Sdk.Win32.winmd" />
+    <EmbeddedResource Include="$(PkgMicrosoft_Windows_SDK_Win32Metadata)\content\Microsoft.Windows.Sdk.Win32.Interop.dll" />
     <EmbeddedResource Include="@(YamlDocOutputPath)" />
   </ItemGroup>
 
@@ -31,7 +32,7 @@
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="3.8.0-5.final" />
     <PackageReference Include="Nullable" Version="1.3.0" PrivateAssets="all" />
     <PackageReference Include="System.Reflection.Metadata" Version="5.0.0" />
-    <PackageReference Include="Microsoft.Windows.SDK.Win32Metadata" Version="10.0.21260.1000-preview.rs-onecore-dep" GeneratePathProperty="true" />
+    <PackageReference Include="Microsoft.Windows.SDK.Win32Metadata" Version="10.0.21269.1001-preview.rs-prerelease" GeneratePathProperty="true" />
     <PackageReference Include="YamlDotNet" Version="8.1.2" />
   </ItemGroup>
 
@@ -39,5 +40,5 @@
     <ProjectReference Include="..\ScrapeDocs\ScrapeDocs.csproj" ReferenceOutputAssembly="false" OutputItemType="ScraperTool" SetTargetFramework="TargetFramework=netcoreapp3.1" />
   </ItemGroup>
 
-  <Import Project="Win32.CodeGen.targets"/>
+  <Import Project="Win32.CodeGen.targets" />
 </Project>
