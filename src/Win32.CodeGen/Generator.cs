@@ -674,6 +674,24 @@ namespace Win32.CodeGen
                             docCommentsBuilder.Append("/// ");
                         }
 
+                        if (paramDocLine.IndexOf("<table", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            paramDocLine.IndexOf("<img", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            paramDocLine.IndexOf("```", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            paramDocLine.IndexOf("<<", StringComparison.OrdinalIgnoreCase) >= 0)
+                        {
+                            // We don't try to format tables, so truncate at this point.
+                            if (inParagraph)
+                            {
+                                docCommentsBuilder.AppendLine("</para>");
+                                inParagraph = false;
+                                inComment = false;
+                            }
+
+                            docCommentsBuilder.AppendLine($@"/// <para>This doc was truncated.</para>");
+
+                            break; // is this the right way?
+                        }
+
                         docCommentsBuilder.Append(paramDocLine);
                     }
 
@@ -686,6 +704,7 @@ namespace Win32.CodeGen
 
                         docCommentsBuilder.AppendLine("</para>");
                         inParagraph = false;
+                        inComment = false;
                     }
 
                     if (docs is object)
