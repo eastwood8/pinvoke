@@ -23,6 +23,11 @@
       "title": "The name of a single class under which all p/invoke methods should be added, regardless of imported module.",
       "type": "string",
       "pattern": "^\\w+$"
+    },
+    "public": {
+      "title": "A value indicating whether to expose the generated APIs publicly (as opposed to internally).",
+      "type": "boolean",
+      "default": false
     }
   }
 }

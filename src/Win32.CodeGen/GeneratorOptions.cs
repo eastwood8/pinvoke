@@ -13,6 +13,8 @@ namespace Win32.CodeGen
 
         public string Namespace { get; init; } = "Microsoft.Windows.Sdk";
 
+        public bool Public { get; init; }
+
         public void Validate()
         {
             if (string.IsNullOrWhiteSpace(this.Namespace))

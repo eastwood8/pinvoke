@@ -165,8 +165,9 @@ namespace Win32.CodeGen
 
         private static readonly string[] WarningsToSuppressInGeneratedCode = new string[]
         {
-            "CS1591",
-            "CS1573",
+            "CS1591", // missing docs
+            "CS1573", // missing docs for an individual parameter
+            "CS0649", // fields never assigned to
         };
 
         private static readonly AttributeSyntax InAttributeSyntax = Attribute(IdentifierName("In"));
@@ -174,8 +175,6 @@ namespace Win32.CodeGen
         private static readonly AttributeSyntax OptionalAttributeSyntax = Attribute(IdentifierName("Optional"));
         private static readonly AttributeSyntax FlagsAttributeSyntax = Attribute(IdentifierName("Flags"));
         private static readonly AttributeSyntax FieldOffsetAttributeSyntax = Attribute(IdentifierName("FieldOffset"));
-
-        private static readonly SyntaxTokenList PublicModifiers = TokenList(Token(SyntaxKind.PublicKeyword));
 
         private readonly Stream metadataStream;
         private readonly PEReader peReader;
@@ -284,17 +283,19 @@ namespace Win32.CodeGen
 
         private string SingleClassName => this.options.OneClass ?? throw new InvalidOperationException("Not in one-class mode.");
 
+        private SyntaxKind Visibility => this.options.Public ? SyntaxKind.PublicKeyword : SyntaxKind.InternalKeyword;
+
         private IEnumerable<MemberDeclarationSyntax> NamespaceMembers =>
             this.GroupByModule ?
                 this.MembersByClass.Select(kv =>
                     ClassDeclaration(Identifier(GetClassNameForModule(kv.Key)))
-                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
+                        .AddModifiers(Token(this.Visibility), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
                         .AddMembers(kv.ToArray()))
                     .Concat(this.types.Values.ToArray()) :
                 new MemberDeclarationSyntax[]
                 {
                     ClassDeclaration(Identifier(this.SingleClassName))
-                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
+                        .AddModifiers(Token(this.Visibility), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.PartialKeyword))
                         .AddMembers(this.MembersByClass.SelectMany(kv => kv).ToArray()),
                 }
                 .Concat(this.safeHandleTypes)
@@ -463,7 +464,7 @@ namespace Win32.CodeGen
 
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
                 List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName, entrypoint))),
-                modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.ExternKeyword)),
+                modifiers: TokenList(Token(this.Visibility), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.ExternKeyword)),
                 returnType,
                 explicitInterfaceSpecifier: null!,
                 SafeIdentifier(methodName),
@@ -1047,7 +1048,7 @@ namespace Win32.CodeGen
             members.Add(releaseHandleDeclaration);
 
             ClassDeclarationSyntax safeHandleDeclaration = ClassDeclaration(safeHandleClassName)
-                .AddModifiers(Token(SyntaxKind.PublicKeyword))
+                .AddModifiers(Token(this.Visibility))
                 .AddBaseListTypes(SimpleBaseType(SafeHandleTypeSyntax))
                 .AddMembers(members.ToArray())
                 .WithLeadingTrivia(ParseLeadingTrivia($@"/// <summary>
@@ -1294,7 +1295,7 @@ namespace Win32.CodeGen
 
                 MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
                     List<AttributeListSyntax>(),
-                    modifiers: TokenList(Token(SyntaxKind.PublicKeyword)),
+                    modifiers: TokenList(Token(this.Visibility)),
                     returnType,
                     explicitInterfaceSpecifier: null!,
                     SafeIdentifier(methodName),
@@ -1336,7 +1337,7 @@ namespace Win32.CodeGen
 
             var iface = StructDeclaration(ifaceName.Identifier)
                 .AddMembers(members.ToArray())
-                .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword));
+                .AddModifiers(Token(this.Visibility), Token(SyntaxKind.UnsafeKeyword));
 
             if (guid != Guid.Empty)
             {
@@ -1391,7 +1392,7 @@ namespace Win32.CodeGen
 
             DelegateDeclarationSyntax result = DelegateDeclaration(signature.ReturnType, name)
                 .WithParameterList(this.CreateParameterList(invokeMethodDef, signature))
-                .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword));
+                .AddModifiers(Token(this.Visibility), Token(SyntaxKind.UnsafeKeyword));
 
             if (callingConvention.HasValue)
             {
@@ -1436,7 +1437,7 @@ namespace Win32.CodeGen
                         .AddDeclarationVariables(
                             fieldDeclarator
                                 .WithArgumentList(BracketedArgumentList(SingletonSeparatedList(Argument(size)))))
-                        .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword), Token(SyntaxKind.FixedKeyword));
+                        .AddModifiers(Token(this.Visibility), Token(SyntaxKind.UnsafeKeyword), Token(SyntaxKind.FixedKeyword));
                 }
                 else
                 {
@@ -1449,7 +1450,7 @@ namespace Win32.CodeGen
                     }
 
                     field = FieldDeclaration(VariableDeclaration(fieldInfo.FieldType).AddVariables(fieldDeclarator))
-                        .AddModifiers(Token(fieldInfo.AdditionalMembers.Count > 0 ? SyntaxKind.PrivateKeyword : SyntaxKind.PublicKeyword));
+                        .AddModifiers(Token(fieldInfo.AdditionalMembers.Count > 0 ? SyntaxKind.PrivateKeyword : this.Visibility));
 
                     if (fieldInfo.AdditionalMembers.Count > 0)
                     {
@@ -1479,7 +1480,7 @@ namespace Win32.CodeGen
 
             StructDeclarationSyntax result = StructDeclaration(name)
                 .AddMembers(members.ToArray())
-                .WithModifiers(PublicModifiers);
+                .WithModifiers(TokenList(Token(this.Visibility)));
 
             TypeLayout layout = typeDef.GetLayout();
             if (!layout.IsDefault || (typeDef.Attributes & TypeAttributes.ExplicitLayout) == TypeAttributes.ExplicitLayout)
@@ -1550,7 +1551,7 @@ namespace Win32.CodeGen
             var name = this.mr.GetString(typeDef.Name);
             EnumDeclarationSyntax result = EnumDeclaration(name)
                 .WithMembers(SeparatedList<EnumMemberDeclarationSyntax>(enumValues.ToArray()))
-                .WithModifiers(PublicModifiers);
+                .WithModifiers(TokenList(Token(this.Visibility)));
 
             if (!(enumBaseType is PredefinedTypeSyntax { Keyword: { RawKind: (int)SyntaxKind.IntKeyword } }))
             {
@@ -1765,7 +1766,7 @@ namespace Win32.CodeGen
                     body = Block(FixedStatement(fixedExpression, body));
                 }
 
-                var modifiers = TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword));
+                var modifiers = TokenList(Token(this.Visibility), Token(SyntaxKind.UnsafeKeyword));
                 if (isStatic)
                 {
                     modifiers = modifiers.Insert(1, Token(SyntaxKind.StaticKeyword));
@@ -1957,7 +1958,7 @@ namespace Win32.CodeGen
                                 // Use int for the field, and generate a property accessor.
                                 ExpressionSyntax hiddenFieldAccess = GetHiddenFieldAccess();
                                 var property = PropertyDeclaration(PredefinedType(Token(SyntaxKind.BoolKeyword)), fieldName)
-                                    .AddModifiers(Token(SyntaxKind.PublicKeyword))
+                                    .AddModifiers(Token(this.Visibility))
                                     .AddAccessorListAccessors(
                                         AccessorDeclaration(SyntaxKind.GetAccessorDeclaration)
                                             .WithExpressionBody(ArrowExpressionClause(BinaryExpression(
@@ -2035,7 +2036,7 @@ namespace Win32.CodeGen
                     VariableDeclarator(pointerName.Identifier).WithInitializer(
                         EqualsValueClause(PrefixUnaryExpression(SyntaxKind.AddressOfExpression, hiddenFieldAccess))));
                 var property = PropertyDeclaration(MakeSpanOfT(elementType), fieldName)
-                    .AddModifiers(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.UnsafeKeyword))
+                    .AddModifiers(Token(this.Visibility), Token(SyntaxKind.UnsafeKeyword))
                     .AddAccessorListAccessors(AccessorDeclaration(SyntaxKind.GetAccessorDeclaration).WithBody(
                         Block(FixedStatement(
                             pointerDeclaration,
