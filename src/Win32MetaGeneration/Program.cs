@@ -10,6 +10,7 @@ namespace Win32.CodeGen
     using System.Reflection;
     using System.Text;
     using System.Threading;
+    using Microsoft.CodeAnalysis.CSharp;
 
     internal class Program
     {
@@ -37,10 +38,13 @@ namespace Win32.CodeGen
 
                 var sw = Stopwatch.StartNew();
 
-                var generator = new Generator(new GeneratorOptions
-                {
-                    WideCharOnly = true,
-                });
+                var generator = new Generator(
+                    new GeneratorOptions
+                    {
+                        WideCharOnly = true,
+                        EmitSingleFile = true,
+                    },
+                    parseOptions: CSharpParseOptions.Default.WithLanguageVersion(LanguageVersion.CSharp9));
                 if (args.Length > 0)
                 {
                     foreach (string name in args)

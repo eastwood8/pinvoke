@@ -262,7 +262,7 @@ namespace Win32.CodeGen
 
         internal MetadataReader Reader => this.mr;
 
-        internal LanguageVersion LanguageVersion { get; set; } = LanguageVersion.CSharp9;
+        internal LanguageVersion LanguageVersion => this.parseOptions?.LanguageVersion ?? LanguageVersion.CSharp9;
 
         private bool WideCharOnly => this.options.WideCharOnly;
 
