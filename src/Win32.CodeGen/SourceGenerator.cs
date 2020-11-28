@@ -10,13 +10,15 @@ namespace Win32.CodeGen
     using System.Linq;
     using System.Reflection;
     using System.Text;
+    using System.Text.Json;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.Text;
 
     [Generator]
     public class SourceGenerator : ISourceGenerator
     {
-        private const string NativeMethodsAdditionalFileName = "NativeMethods.txt";
+        private const string NativeMethodsTxtAdditionalFileName = "NativeMethods.txt";
+        private const string NativeMethodsJsonAdditionalFileName = "NativeMethods.json";
         private static readonly DiagnosticDescriptor NoMatchingMethodOrType = new DiagnosticDescriptor(
             "PInvoke001",
             "No matching method or type found",
@@ -39,18 +41,30 @@ namespace Win32.CodeGen
 
         public void Execute(GeneratorExecutionContext context)
         {
-            var generator = new Generator
+            GeneratorOptions? options = null;
+            AdditionalText? nativeMethodsJsonFile = context.AdditionalFiles
+                .FirstOrDefault(af => string.Equals(Path.GetFileName(af.Path), NativeMethodsJsonAdditionalFileName, StringComparison.OrdinalIgnoreCase));
+            if (nativeMethodsJsonFile is object)
             {
-                GroupByModule = false,
-            };
-            AdditionalText? nativeMethodsFile = context.AdditionalFiles
-                .FirstOrDefault(af => string.Equals(Path.GetFileName(af.Path), NativeMethodsAdditionalFileName, StringComparison.OrdinalIgnoreCase));
-            if (nativeMethodsFile is null)
+                string optionsJson = nativeMethodsJsonFile.GetText(context.CancellationToken)!.ToString();
+                options = JsonSerializer.Deserialize<GeneratorOptions>(optionsJson, new JsonSerializerOptions
+                {
+                    AllowTrailingCommas = true,
+                    ReadCommentHandling = JsonCommentHandling.Skip,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                });
+            }
+
+            AdditionalText? nativeMethodsTxtFile = context.AdditionalFiles
+                .FirstOrDefault(af => string.Equals(Path.GetFileName(af.Path), NativeMethodsTxtAdditionalFileName, StringComparison.OrdinalIgnoreCase));
+            if (nativeMethodsTxtFile is null)
             {
                 return;
             }
 
-            SourceText? nativeMethodsTxt = nativeMethodsFile.GetText(context.CancellationToken);
+            var generator = new Generator(options);
+
+            SourceText? nativeMethodsTxt = nativeMethodsTxtFile.GetText(context.CancellationToken);
             if (nativeMethodsTxt is null)
             {
                 return;
@@ -65,7 +79,7 @@ namespace Win32.CodeGen
                     continue;
                 }
 
-                var location = Location.Create(nativeMethodsFile.Path, line.Span, nativeMethodsTxt.Lines.GetLinePositionSpan(line.Span));
+                var location = Location.Create(nativeMethodsTxtFile.Path, line.Span, nativeMethodsTxt.Lines.GetLinePositionSpan(line.Span));
                 if (name.EndsWith(".*"))
                 {
                     var moduleName = name.Substring(0, name.Length - 2);

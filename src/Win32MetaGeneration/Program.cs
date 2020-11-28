@@ -31,10 +31,10 @@ namespace Win32.CodeGen
 
                 var sw = Stopwatch.StartNew();
 
-                var generator = new Generator()
+                var generator = new Generator(new GeneratorOptions
                 {
                     WideCharOnly = true,
-                };
+                });
                 if (args.Length > 0)
                 {
                     foreach (string name in args)

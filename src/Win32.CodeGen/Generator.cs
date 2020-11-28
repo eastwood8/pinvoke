@@ -209,8 +209,13 @@ namespace Win32.CodeGen
 
         private readonly Dictionary<string, TypeSyntax?> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax?>();
 
-        public Generator()
+        private readonly GeneratorOptions options;
+
+        public Generator(GeneratorOptions? options = null)
         {
+            this.options = options ??= new GeneratorOptions();
+            this.options.Validate();
+
             Stream? metadataLibraryStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Win32.CodeGen.Microsoft.Windows.Sdk.Win32.winmd");
             if (metadataLibraryStream is null)
             {
@@ -265,19 +270,19 @@ namespace Win32.CodeGen
                 .NormalizeWhitespace();
         }
 
-        public bool WideCharOnly { get; set; } = true;
-
-        public bool GroupByModule { get; set; } = true;
-
         internal TypeDefinition Apis { get; }
 
         internal MetadataReader Reader => this.mr;
 
         internal LanguageVersion LanguageVersion { get; set; } = LanguageVersion.CSharp9;
 
-        internal string Namespace { get; set; } = "Microsoft.Windows.Sdk";
+        private bool WideCharOnly => this.options.WideCharOnly;
 
-        internal string SingleClassName { get; set; } = "PInvoke";
+        private bool GroupByModule => this.options.GroupByModule;
+
+        private string Namespace => this.options.Namespace;
+
+        private string SingleClassName => this.options.SingleClassName;
 
         private IEnumerable<MemberDeclarationSyntax> NamespaceMembers =>
             this.GroupByModule ?
