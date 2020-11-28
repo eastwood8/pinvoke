@@ -6,6 +6,7 @@ namespace Win32.CodeGen
     using System;
     using System.Diagnostics;
     using System.IO;
+    using System.Linq;
     using System.Reflection;
     using System.Text;
     using System.Threading;
@@ -27,6 +28,7 @@ namespace Win32.CodeGen
             try
             {
                 string outputDirectory = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "output");
+                Directory.Delete(outputDirectory, recursive: true);
                 Directory.CreateDirectory(outputDirectory);
 
                 var sw = Stopwatch.StartNew();
@@ -58,11 +60,15 @@ namespace Win32.CodeGen
                     generator.GenerateAll(cts.Token);
                 }
 
-                string outputPath = Path.Combine(outputDirectory, "NativeMethods.cs");
-                Console.WriteLine("Writing output file: {0}", outputPath);
-                using var generatedSourceStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
-                using var generatedSourceWriter = new StreamWriter(generatedSourceStream, Encoding.UTF8);
-                generator.CompilationUnit.WriteTo(generatedSourceWriter);
+                var compilationUnits = generator.GetCompilationUnits(cts.Token);
+                compilationUnits.AsParallel().WithCancellation(cts.Token).ForAll(unit =>
+                {
+                    string outputPath = Path.Combine(outputDirectory, unit.Key);
+                    Console.WriteLine("Writing output file: {0}", outputPath);
+                    using var generatedSourceStream = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.Read);
+                    using var generatedSourceWriter = new StreamWriter(generatedSourceStream, Encoding.UTF8);
+                    unit.Value.WriteTo(generatedSourceWriter);
+                });
 
                 Console.WriteLine("Generation time: {0}", sw.Elapsed);
             }

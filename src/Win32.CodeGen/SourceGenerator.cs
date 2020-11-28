@@ -97,7 +97,11 @@ namespace Win32.CodeGen
                 }
             }
 
-            context.AddSource("NativeMethods.cs", generator.CompilationUnit.ToFullString());
+            var compilationUnits = generator.GetCompilationUnits(context.CancellationToken);
+            foreach (var unit in compilationUnits)
+            {
+                context.AddSource(unit.Key, unit.Value.ToFullString());
+            }
         }
     }
 }
