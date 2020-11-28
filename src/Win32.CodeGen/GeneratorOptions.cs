@@ -9,7 +9,7 @@ namespace Win32.CodeGen
     {
         public bool WideCharOnly { get; init; } = true;
 
-        public string? OneClass { get; init; } = "PInvoke";
+        public string? ClassName { get; init; } = "PInvoke";
 
         public string Namespace { get; init; } = "Microsoft.Windows.Sdk";
 
