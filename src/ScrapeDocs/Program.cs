@@ -21,6 +21,7 @@ namespace ScrapeDocs
         private static readonly Regex FieldHeaderPattern = new Regex(@"^### -field (\w+)", RegexOptions.Compiled);
         private static readonly Regex ReturnHeaderPattern = new Regex(@"^## -returns", RegexOptions.Compiled);
         private static readonly Regex RemarksHeaderPattern = new Regex(@"^## -remarks", RegexOptions.Compiled);
+        private static readonly Regex InlineCodeTag = new Regex(@"\<code\>(.*)\</code\>", RegexOptions.Compiled);
         private readonly string contentBasePath;
         private readonly string outputPath;
 
@@ -151,6 +152,13 @@ namespace ScrapeDocs
             StringBuilder docBuilder = new StringBuilder();
             line = mdFileReader.ReadLine();
 
+            static string FixupLine(string line)
+            {
+                line = line.Replace("href=\"/", "href=\"https://docs.microsoft.com/");
+                line = InlineCodeTag.Replace(line, match => $"<c>{match.Groups[1].Value}</c>");
+                return line;
+            }
+
             void ParseTextSection(Match match, out YamlScalarNode node)
             {
                 while ((line = mdFileReader.ReadLine()) is object)
@@ -160,6 +168,7 @@ namespace ScrapeDocs
                         break;
                     }
 
+                    line = FixupLine(line);
                     docBuilder.AppendLine(line);
                 }
 
@@ -178,6 +187,7 @@ namespace ScrapeDocs
                         break;
                     }
 
+                    line = FixupLine(line);
                     docBuilder.AppendLine(line);
                 }
 
