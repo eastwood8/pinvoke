@@ -12,6 +12,7 @@ namespace Win32.CodeGen
     using System.Text;
     using System.Text.Json;
     using Microsoft.CodeAnalysis;
+    using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.Text;
 
     [Generator]
@@ -41,6 +42,11 @@ namespace Win32.CodeGen
 
         public void Execute(GeneratorExecutionContext context)
         {
+            if (!(context.Compilation is CSharpCompilation))
+            {
+                return;
+            }
+
             GeneratorOptions? options = null;
             AdditionalText? nativeMethodsJsonFile = context.AdditionalFiles
                 .FirstOrDefault(af => string.Equals(Path.GetFileName(af.Path), NativeMethodsJsonAdditionalFileName, StringComparison.OrdinalIgnoreCase));
@@ -62,7 +68,7 @@ namespace Win32.CodeGen
                 return;
             }
 
-            var generator = new Generator(options);
+            var generator = new Generator(options, (CSharpCompilation)context.Compilation, (CSharpParseOptions)context.ParseOptions);
 
             SourceText? nativeMethodsTxt = nativeMethodsTxtFile.GetText(context.CancellationToken);
             if (nativeMethodsTxt is null)

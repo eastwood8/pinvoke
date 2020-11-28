@@ -210,11 +210,15 @@ namespace Win32.CodeGen
         private readonly Dictionary<string, TypeSyntax?> releaseMethodsWithSafeHandleTypesGenerating = new Dictionary<string, TypeSyntax?>();
 
         private readonly GeneratorOptions options;
+        private readonly CSharpCompilation? compilation;
+        private readonly CSharpParseOptions? parseOptions;
 
-        public Generator(GeneratorOptions? options = null)
+        public Generator(GeneratorOptions? options = null, CSharpCompilation? compilation = null, CSharpParseOptions? parseOptions = null)
         {
             this.options = options ??= new GeneratorOptions();
             this.options.Validate();
+            this.compilation = compilation;
+            this.parseOptions = parseOptions;
 
             Stream? metadataLibraryStream = Assembly.GetExecutingAssembly().GetManifestResourceStream("Win32.CodeGen.Microsoft.Windows.Sdk.Win32.winmd");
             if (metadataLibraryStream is null)
