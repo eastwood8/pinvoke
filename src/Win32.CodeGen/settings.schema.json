@@ -24,6 +24,11 @@
       "type": "boolean",
       "default": true
     },
+    "emitSingleFile": {
+      "title": "A value indicating whether to emit a single source file as opposed to types spread across many files.",
+      "type": "boolean",
+      "default": false
+    },
     "className": {
       "title": "The name of a single class under which all p/invoke methods should be added, regardless of imported module. Use null for one class per imported module.",
       "type": [ "string", "null" ],

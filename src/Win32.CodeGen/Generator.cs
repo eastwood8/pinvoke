@@ -388,17 +388,26 @@ namespace Win32.CodeGen
             const string FilenamePattern = "{0}.cs";
             var results = new Dictionary<string, NamespaceDeclarationSyntax>(StringComparer.OrdinalIgnoreCase);
 
-            foreach (var member in this.NamespaceMembers)
+            if (this.options.EmitSingleFile)
             {
-                string identifier = member switch
+                results.Add(
+                    string.Format(CultureInfo.InvariantCulture, FilenamePattern, "NativeMethods"),
+                    starterNamespace.AddMembers(this.NamespaceMembers.ToArray()));
+            }
+            else
+            {
+                foreach (var member in this.NamespaceMembers)
                 {
-                    ClassDeclarationSyntax classDecl => classDecl.Identifier.ValueText,
-                    StructDeclarationSyntax structDecl=> structDecl.Identifier.ValueText,
-                    EnumDeclarationSyntax enumDecl => enumDecl.Identifier.ValueText,
-                    _ => throw new NotSupportedException("Unsupported member type: " + member.GetType().Name),
-                };
+                    string identifier = member switch
+                    {
+                        ClassDeclarationSyntax classDecl => classDecl.Identifier.ValueText,
+                        StructDeclarationSyntax structDecl => structDecl.Identifier.ValueText,
+                        EnumDeclarationSyntax enumDecl => enumDecl.Identifier.ValueText,
+                        _ => throw new NotSupportedException("Unsupported member type: " + member.GetType().Name),
+                    };
 
-                results.Add(string.Format(CultureInfo.InvariantCulture, FilenamePattern, identifier), starterNamespace.AddMembers(member));
+                    results.Add(string.Format(CultureInfo.InvariantCulture, FilenamePattern, identifier), starterNamespace.AddMembers(member));
+                }
             }
 
             var normalizedResults = new Dictionary<string, CompilationUnitSyntax>(StringComparer.OrdinalIgnoreCase);
