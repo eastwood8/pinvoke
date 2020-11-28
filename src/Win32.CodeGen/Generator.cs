@@ -1587,7 +1587,8 @@ namespace Win32.CodeGen
                     bool isPointerToPointer = ptrType.ElementType is PointerTypeSyntax;
                     bool isOptional = (param.Attributes & ParameterAttributes.Optional) == ParameterAttributes.Optional;
                     bool isIn = (param.Attributes & ParameterAttributes.In) == ParameterAttributes.In;
-                    bool isOut = (param.Attributes & ParameterAttributes.Out) == ParameterAttributes.Out;
+                    bool isComOutPtr = param.GetCustomAttributes().Any(ah => this.IsAttribute(this.mr.GetCustomAttribute(ah), InteropDecorationNamespace, "ComOutPtrAttribute"));
+                    bool isOut = isComOutPtr || (param.Attributes & ParameterAttributes.Out) == ParameterAttributes.Out;
 
                     // If there are no SAL annotations at all, assume it is bidirectional.
                     if (!isOptional && !isIn && !isOut)
