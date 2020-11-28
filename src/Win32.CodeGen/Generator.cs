@@ -698,6 +698,8 @@ namespace Win32.CodeGen
 
                         if (paramDocLine.IndexOf("<table", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             paramDocLine.IndexOf("<img", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            paramDocLine.IndexOf("<ul", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                            paramDocLine.IndexOf("<ol", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             paramDocLine.IndexOf("```", StringComparison.OrdinalIgnoreCase) >= 0 ||
                             paramDocLine.IndexOf("<<", StringComparison.OrdinalIgnoreCase) >= 0)
                         {
@@ -1304,7 +1306,7 @@ namespace Win32.CodeGen
                 }
 
                 // Add documentation if we can find it.
-                methodDeclaration = AddApiDocumentation($"{ifaceName}::{methodName}", methodDeclaration);
+                methodDeclaration = AddApiDocumentation($"{ifaceName}.{methodName}", methodDeclaration);
 
                 if (methodDeclaration.ReturnType is PointerTypeSyntax || methodDeclaration.ParameterList.Parameters.Any(p => p.Type is PointerTypeSyntax))
                 {
