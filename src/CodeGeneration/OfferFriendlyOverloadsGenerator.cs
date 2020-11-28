@@ -606,7 +606,8 @@ namespace PInvoke
             {
                 fixedStatements.Add(FixedStatement(
                     VariableDeclaration(PointerType(PredefinedType(Token(SyntaxKind.VoidKeyword))))
-                    .AddVariables(VariableDeclarator(EmptyStackArrayLocalPointer).WithInitializer(EqualsValueClause(IdentifierName(EmptyStackArrayLocal)))), Block()));
+                        .AddVariables(VariableDeclarator(EmptyStackArrayLocalPointer).WithInitializer(EqualsValueClause(IdentifierName(EmptyStackArrayLocal)))),
+                    Block()));
             }
 
             if (fixedStatements.Count > 0)
