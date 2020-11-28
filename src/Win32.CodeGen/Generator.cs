@@ -17,7 +17,6 @@ namespace Win32.CodeGen
     using System.Runtime.InteropServices;
     using System.Text;
     using System.Threading;
-    using System.Xml.Linq;
     using Microsoft.CodeAnalysis;
     using Microsoft.CodeAnalysis.CSharp;
     using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -459,7 +458,7 @@ namespace Win32.CodeGen
 
             MethodDeclarationSyntax methodDeclaration = MethodDeclaration(
                 List<AttributeListSyntax>().Add(AttributeList().AddAttributes(DllImport(methodDefinition, import, moduleName, entrypoint))),
-                modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.ExternKeyword), Token(SyntaxKind.StaticKeyword)),
+                modifiers: TokenList(Token(SyntaxKind.PublicKeyword), Token(SyntaxKind.StaticKeyword), Token(SyntaxKind.ExternKeyword)),
                 returnType,
                 explicitInterfaceSpecifier: null!,
                 SafeIdentifier(methodName),
@@ -636,7 +635,7 @@ namespace Win32.CodeGen
                 {
                     docCommentsBuilder.AppendLine();
                     docCommentsBuilder.AppendLine($@"/// <para><see href=""{docs.HelpLink}"">Learn more about this API from docs.microsoft.com</see>.</para>");
-                    docCommentsBuilder.Append("///");
+                    docCommentsBuilder.Append("/// ");
                 }
 
                 docCommentsBuilder.AppendLine($"</remarks>");
@@ -646,6 +645,11 @@ namespace Win32.CodeGen
             }
 
             return memberDeclaration;
+
+            static void EmitLine(StringBuilder stringBuilder, string yamlDocSrc)
+            {
+                stringBuilder.Append(yamlDocSrc.Trim());
+            }
 
             static void EmitDoc(string yamlDocSrc, StringBuilder docCommentsBuilder, Docs.ApiDetails? docs, string docsAnchor)
             {
@@ -716,7 +720,7 @@ namespace Win32.CodeGen
                             break; // is this the right way?
                         }
 
-                        docCommentsBuilder.Append(paramDocLine);
+                        EmitLine(docCommentsBuilder, paramDocLine);
                     }
 
                     if (inParagraph)
@@ -740,7 +744,7 @@ namespace Win32.CodeGen
                 }
                 else
                 {
-                    docCommentsBuilder.Append(new XText(yamlDocSrc).ToString());
+                    EmitLine(docCommentsBuilder, yamlDocSrc);
                 }
             }
         }
