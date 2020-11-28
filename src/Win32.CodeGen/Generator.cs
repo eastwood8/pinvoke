@@ -577,25 +577,47 @@ namespace Win32.CodeGen
                     }
                 }
 
-                if (docs.Fields is object && memberDeclaration is StructDeclarationSyntax structDeclaration)
+                if (docs.Fields is object)
                 {
                     var fieldsDocBuilder = new StringBuilder();
-                    memberDeclaration = memberDeclaration.ReplaceNodes(
-                        structDeclaration.Members.OfType<FieldDeclarationSyntax>(),
-                        (_, field) =>
-                        {
-                            var variable = field.Declaration.Variables.Single();
-                            if (docs.Fields.TryGetValue(variable.Identifier.ValueText, out string? fieldDoc))
-                            {
-                                fieldsDocBuilder.Append($@"/// <summary>");
-                                EmitDoc(fieldDoc, fieldsDocBuilder, docs, "members");
-                                fieldsDocBuilder.AppendLine("</summary>");
-                                field = field.WithLeadingTrivia(ParseLeadingTrivia(fieldsDocBuilder.ToString()));
-                                fieldsDocBuilder.Clear();
-                            }
+                    switch (memberDeclaration)
+                    {
+                        case StructDeclarationSyntax structDeclaration:
+                            memberDeclaration = memberDeclaration.ReplaceNodes(
+                                structDeclaration.Members.OfType<FieldDeclarationSyntax>(),
+                                (_, field) =>
+                                {
+                                    var variable = field.Declaration.Variables.Single();
+                                    if (docs.Fields.TryGetValue(variable.Identifier.ValueText, out string? fieldDoc))
+                                    {
+                                        fieldsDocBuilder.Append($@"/// <summary>");
+                                        EmitDoc(fieldDoc, fieldsDocBuilder, docs, "members");
+                                        fieldsDocBuilder.AppendLine("</summary>");
+                                        field = field.WithLeadingTrivia(ParseLeadingTrivia(fieldsDocBuilder.ToString()));
+                                        fieldsDocBuilder.Clear();
+                                    }
 
-                            return field;
-                        });
+                                    return field;
+                                });
+                            break;
+                        case EnumDeclarationSyntax enumDeclaration:
+                            memberDeclaration = memberDeclaration.ReplaceNodes(
+                                enumDeclaration.Members,
+                                (_, field) =>
+                                {
+                                    if (docs.Fields.TryGetValue(field.Identifier.ValueText, out string? fieldDoc))
+                                    {
+                                        fieldsDocBuilder.Append($@"/// <summary>");
+                                        EmitDoc(fieldDoc, fieldsDocBuilder, docs, "members");
+                                        fieldsDocBuilder.AppendLine("</summary>");
+                                        field = field.WithLeadingTrivia(ParseLeadingTrivia(fieldsDocBuilder.ToString()));
+                                        fieldsDocBuilder.Clear();
+                                    }
+
+                                    return field;
+                                });
+                            break;
+                    }
                 }
 
                 if (docs.ReturnValue is object)
