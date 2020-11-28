@@ -278,11 +278,11 @@ namespace Win32.CodeGen
 
         private bool WideCharOnly => this.options.WideCharOnly;
 
-        private bool GroupByModule => this.options.GroupByModule;
+        private bool GroupByModule => string.IsNullOrEmpty(this.options.OneClass);
 
         private string Namespace => this.options.Namespace;
 
-        private string SingleClassName => this.options.SingleClassName;
+        private string SingleClassName => this.options.OneClass ?? throw new InvalidOperationException("Not in one-class mode.");
 
         private IEnumerable<MemberDeclarationSyntax> NamespaceMembers =>
             this.GroupByModule ?

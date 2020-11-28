@@ -9,11 +9,9 @@ namespace Win32.CodeGen
     {
         public bool WideCharOnly { get; init; } = true;
 
-        public bool GroupByModule { get; init; } = true;
+        public string? OneClass { get; init; }
 
         public string Namespace { get; init; } = "Microsoft.Windows.Sdk";
-
-        public string SingleClassName { get; init; } = "PInvoke";
 
         public void Validate()
         {

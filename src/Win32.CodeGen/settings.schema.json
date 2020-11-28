@@ -1,0 +1,28 @@
+{
+  "definitions": {},
+  "$schema": "http://json-schema.org/draft-04/schema",
+  "$id": "https://example.com/object1606572004.json",
+  "title": "Root",
+  "type": "object",
+  "properties": {
+    "namespace": {
+      "title": "Namespace for generated code.",
+      "type": "string",
+      "default": "Microsoft.Windows.Sdk",
+      "examples": [
+        "PInvoke"
+      ],
+      "pattern": "^\\w+(?:\\.\\w+)*$"
+    },
+    "wideCharOnly": {
+      "title": "Omit ANSI functions and remove `W` suffix from UTF-16 functions.",
+      "type": "boolean",
+      "default": true
+    },
+    "oneClass": {
+      "title": "The name of a single class under which all p/invoke methods should be added, regardless of imported module.",
+      "type": "string",
+      "pattern": "^\\w+$"
+    }
+  }
+}
