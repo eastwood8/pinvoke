@@ -6,6 +6,7 @@ namespace ScrapeDocs
     using System;
     using System.Collections.Concurrent;
     using System.Diagnostics;
+    using System.Diagnostics.CodeAnalysis;
     using System.IO;
     using System.Linq;
     using System.Reflection;
@@ -128,9 +129,36 @@ namespace ScrapeDocs
                 return null;
             }
 
-            var methodNames = (YamlSequenceNode)yaml.Documents[0].RootNode["api_name"];
-            string? properName = methodNames.Children.Cast<YamlScalarNode>().FirstOrDefault(c => string.Equals(c.Value?.Replace('.', '-'), presumedMethodName, StringComparison.OrdinalIgnoreCase))?.Value;
-            if (properName is null)
+            YamlSequenceNode methodNames = (YamlSequenceNode)yaml.Documents[0].RootNode["api_name"];
+            bool TryGetProperName(string searchFor, char? suffix, [NotNullWhen(true)] out string? match)
+            {
+                if (suffix.HasValue)
+                {
+                    if (searchFor.EndsWith(suffix.Value))
+                    {
+                        searchFor = searchFor.Substring(0, searchFor.Length - 1);
+                    }
+                    else
+                    {
+                        match = null;
+                        return false;
+                    }
+                }
+
+                match = methodNames.Children.Cast<YamlScalarNode>().FirstOrDefault(c => string.Equals(c.Value?.Replace('.', '-'), searchFor, StringComparison.OrdinalIgnoreCase))?.Value;
+
+                if (suffix.HasValue && match is object)
+                {
+                    match += char.ToUpper(suffix.Value);
+                }
+
+                return match is object;
+            }
+
+            // Some structures have filenames that include the W or A suffix when the content doesn't. So try some fuzzy matching.
+            if (!TryGetProperName(presumedMethodName, null, out string? properName) &&
+                !TryGetProperName(presumedMethodName, 'a', out properName) &&
+                !TryGetProperName(presumedMethodName, 'w', out properName))
             {
                 Debug.WriteLine("WARNING: Could not find proper API name in: {0}", filePath);
                 return null;
