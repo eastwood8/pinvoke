@@ -29,12 +29,17 @@ namespace Win32.CodeGen
             try
             {
                 string outputDirectory = Path.Combine(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!, "output");
-                foreach (string file in Directory.EnumerateFiles(outputDirectory, "*", SearchOption.AllDirectories))
+                if (Directory.Exists(outputDirectory))
                 {
-                    File.Delete(file);
+                    foreach (string file in Directory.EnumerateFiles(outputDirectory, "*", SearchOption.AllDirectories))
+                    {
+                        File.Delete(file);
+                    }
                 }
-
-                Directory.CreateDirectory(outputDirectory);
+                else
+                {
+                    Directory.CreateDirectory(outputDirectory);
+                }
 
                 var sw = Stopwatch.StartNew();
 
