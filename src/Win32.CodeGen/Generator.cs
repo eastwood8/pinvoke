@@ -700,10 +700,6 @@ namespace Win32.CodeGen
 
             static void EmitDoc(string yamlDocSrc, StringBuilder docCommentsBuilder, Docs.ApiDetails? docs, string docsAnchor)
             {
-                // TODO: refine docs by
-                // * replacing relative hyperlinks with absolute ones and translate tags.
-                // * replace certain HTML tags with xml doc comment equivalents and bypass escaping.
-                // * include more than just the first line; perhaps at least the first complete sentence.
                 if (yamlDocSrc.Contains('\n'))
                 {
                     docCommentsBuilder.AppendLine();
@@ -987,6 +983,7 @@ namespace Win32.CodeGen
             }
 
             // TODO: Reuse existing SafeHandle's defined in .NET where possible to facilitate interop with APIs that take them.
+            //       https://github.com/microsoft/win32metadata/issues/47
             string safeHandleClassName = $"{releaseMethod}SafeHandle";
             this.TryGetRenamedMethod(releaseMethod, out string? renamedReleaseMethod);
 
@@ -1198,7 +1195,7 @@ namespace Win32.CodeGen
                 }
                 else if (this.mr.StringComparer.Equals(baseTypeName, nameof(Enum)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
                 {
-                    // TODO: reuse .NET types like FileAccess
+                    // Consider reusing .NET types like FILE_SHARE_FLAGS -> System.IO.FileShare
                     typeDeclaration = this.CreateInteropEnum(typeDef);
                 }
                 else if (this.mr.StringComparer.Equals(baseTypeName, nameof(MulticastDelegate)) && this.mr.StringComparer.Equals(baseTypeNamespace, nameof(System)))
@@ -1447,8 +1444,6 @@ namespace Win32.CodeGen
 
         private StructDeclarationSyntax CreateInteropStruct(TypeDefinition typeDef)
         {
-            // TODO: Add handling for
-            // * property indexers (e.g. FILE_REGION_OUTPUT._Region_e__FixedBuffer.this[int]
             string name = this.mr.GetString(typeDef.Name);
 
             var members = new List<MemberDeclarationSyntax>();
@@ -1517,7 +1512,6 @@ namespace Win32.CodeGen
                     field = field.AddAttributeLists(AttributeList().AddAttributes(FieldOffset(offset)));
                 }
 
-                // TODO: add field API documentation.
                 members.Add(field);
             }
 
