@@ -1627,6 +1627,8 @@ namespace Win32.CodeGen
                 // TODO:
                 // * Review double/triple pointer scenarios.
                 // * Create an overload with fewer parameters when one parameter describes the length of another.
+                // * change double-pointers to `out` modifiers on single-pointers.
+                //   * Consider CredEnumerateA, which is a "pointer to an array of pointers" (3-asterisks!). How does FriendlyAttribute improve this, if at all? The memory must be freed through another p/invoke.
                 if (parameters[param.SequenceNumber - 1].Type is PointerTypeSyntax ptrType
                     && !IsVoid(ptrType.ElementType)
                     && !(ptrType.ElementType is IdentifierNameSyntax id && IsInterface(id.Identifier.ValueText)))
@@ -1875,9 +1877,6 @@ namespace Win32.CodeGen
             string name = this.mr.GetString(parameter.Name);
 
             // TODO:
-            // * change double-pointers to `out` modifiers on single-pointers.
-            //   * Consider CredEnumerateA, which is a "pointer to an array of pointers" (3-asterisks!). How does FriendlyAttribute improve this, if at all? The memory must be freed through another p/invoke.
-            // * Add [Friendly] attributes
             // * Notice [Out][RIAAFree] handle producing parameters. Can we make these provide SafeHandle's?
             var parameterInfo = this.ReinterpretMethodSignatureType(methodSignature.ParameterTypes[parameter.SequenceNumber - 1], parameter.GetCustomAttributes());
 
